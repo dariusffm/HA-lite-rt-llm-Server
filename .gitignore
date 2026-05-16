@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Models cache (local dev runs)
+.models/
+*/app/.models/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Build artifacts
+build/
+dist/
