@@ -27,7 +27,7 @@ von CI-Workflows ist.
 | Repo-Form | HA Add-on Repository, mehrere Add-ons in Unterordnern |
 | Repository-Manifest | `repository.yaml` im Repo-Root |
 | Erstes Add-on | `litert-llm-server` |
-| Inferenz-Engine | Google LiteRT (via `ai-edge-litert` + `mediapipe-genai`) |
+| Inferenz-Engine | Google LiteRT-LM (via `litert-lm-api`) |
 | Unterstützte Modelle (MVP) | Mehrere parallel auswählbar: Gemma 2B, Gemma 3-1B, Gemma 3-4B. Phi-2 wurde aus dem MVP gestrichen (siehe Sektion 3, Risiken). |
 | Modell-Lifecycle | Auto-Download via Ollama-kompatibler `/api/pull`-Endpoint; Cache unter `/data/models/` |
 | HTTP-APIs | OpenAI-kompatibel **und** Ollama-kompatibel parallel — beide aktiv |
@@ -38,7 +38,7 @@ von CI-Workflows ist.
 
 ## 3. Architektur-Entscheidung
 
-### Gewählt: Python + FastAPI + `ai-edge-litert` + `mediapipe-genai`
+### Gewählt: Python + FastAPI + `litert-lm-api`
 
 Begründung (Konsens zweier unabhängiger Architektur-Reviews):
 
@@ -47,11 +47,23 @@ Begründung (Konsens zweier unabhängiger Architektur-Reviews):
 - **Klare Bounded Contexts**: Zwei API-Router (OpenAI, Ollama) sind
   Protocol Adapters, die einen einzigen `InferenceService` ansprechen —
   Engine-Wechsel ist später ohne Adapter-Änderung möglich.
-- **Standard-Python-Stack**: `ai-edge-litert` + `mediapipe-genai` sind
-  Googles offizielle Python-Bindings über dem optimierten C++-Kern. Kein
-  Bazel/MediaPipe-Custom-Build nötig.
+- **Standard-Python-Stack**: `litert-lm-api` (PyPI) ist Googles
+  produktionsreifer Python-Wrapper über LiteRT-LM (dem aktuellen
+  Inference-Framework, das die deprecated MediaPipe-LLM-Inference-API
+  abgelöst hat). Bietet `Engine`/`Session`/`Conversation`/`Benchmark`/
+  `SamplerConfig`/`Tool` als sauberes API; kein Bazel/Custom-Build nötig.
 - **Iterationsgeschwindigkeit**: Lokales Testen ohne Docker möglich
   (`uv run pytest`), schnelle Inner-Loops.
+
+> **Historische Anmerkung (2026-05-17)**: Die ursprüngliche Spec
+> referenzierte `ai-edge-litert` + `mediapipe-genai` als Inferenz-Stack.
+> Beim ersten Implementierungs-Schritt zeigte sich, dass
+> `mediapipe.tasks.python.genai.inference.LlmInference` in den aktuellen
+> PyPI-Distributionen nicht mehr existiert und die API als deprecated
+> markiert ist. Google hat den LLM-Inferenz-Pfad in das separate Paket
+> `litert-lm-api` ausgelagert. Die Ports-&-Adapters-Architektur war
+> robust gegenüber diesem Wechsel — nur die `LiteRTEngine`-Implementierung
+> ist betroffen.
 
 ### Verworfen
 
@@ -75,10 +87,12 @@ Zum Vergleich: `llama.cpp` mit GGUF-Quants schafft auf identischer
 Hardware 15–30 tok/s.
 
 **Konsequenz für die Implementierung**: Der **erste Implementierungs-Step
-ist ein PoC-Benchmark** mit Gemma 2B auf der Ziel-Hardware. Ergebnis < 5
-tok/s → Engine-Tausch (z. B. `llama-cpp-python`) wird erwogen, bevor der
-API-Layer ausgebaut wird. Die Ports-&-Adapters-Architektur erlaubt diesen
-Tausch ohne Eingriff in Router oder API-Schemas.
+ist ein PoC-Benchmark** mit Gemma 2B auf der Ziel-Hardware. Der Benchmark
+nutzt `litert_lm.Benchmark` und reportet `last_decode_tokens_per_second`
+als das maßgebliche Akzeptanzkriterium. Ergebnis < 5 tok/s → Engine-Tausch
+(z. B. `llama-cpp-python`) wird erwogen, bevor der API-Layer ausgebaut
+wird. Die Ports-&-Adapters-Architektur erlaubt diesen Tausch ohne
+Eingriff in Router oder API-Schemas.
 
 **Zusätzliches Risiko**: Phi-2 existiert nicht als offizielles
 LiteRT-`.task`-File. Eigene Konvertierung via `ai-edge-torch` wäre
@@ -89,6 +103,11 @@ Konvertierung gewünscht ist.
 
 **Korrigierte MVP-Modellliste**: Gemma 2B, Gemma 3-1B, Gemma 3-4B
 (offizielle Google-LiteRT-`.task`-Builds via HuggingFace/Kaggle).
+
+**Aufgelöstes Risiko (2026-05-17)**: Die Sorge, dass MediaPipe keine
+echte Per-Token-Streaming-API biete und ein Whitespace-Chunking-Workaround
+nötig wäre, ist mit dem Wechsel auf `litert-lm-api` **hinfällig** —
+`litert_lm.Session` liefert nativ Token für Token aus dem Decode-Loop.
 
 ## 4. Repository-Layout
 
@@ -330,8 +349,7 @@ class ModelRegistry(Protocol):
    `model_registry/`. Nur `pydantic`, `typing`, stdlib.
 2. **`adapters/openai_router.py` und `adapters/ollama_router.py`**
    importieren ausschließlich aus `domain/`. Sie sehen niemals
-   `mediapipe_genai`, `ai_edge_litert`, `huggingface_hub` oder andere
-   Engine-/Registry-Details.
+   `litert_lm`, `huggingface_hub` oder andere Engine-/Registry-Details.
 3. **Wiring nur in `__main__.py`**: Hier wird `LiteRTEngine` instantiiert
    und in Router injiziert. Tests injizieren `FakeEngine`.
 4. **Streaming-Konvertierung in den Adaptern**: Domain liefert
@@ -445,8 +463,7 @@ __main__.py     # FastAPI app construction. The ONLY place where concrete
 - `domain/` has no imports from `engines/`, `adapters/`, or `model_registry/`.
 - `adapters/openai_router.py` and `adapters/ollama_router.py` may import
   `domain/` types and call services typed against `domain/` Protocols. They
-  must **never** import `mediapipe_genai`, `ai_edge_litert`, or
-  `huggingface_hub` directly.
+  must **never** import `litert_lm` or `huggingface_hub` directly.
 - Streaming: the domain returns `AsyncIterator[Token]`. SSE framing
   (OpenAI) and NDJSON framing (Ollama) lives in the respective adapter — not
   in the engine and not in the service.
@@ -534,13 +551,12 @@ Nur grobe Reihenfolge — die Detail-Schritte kommen aus `writing-plans`.
 1. **Repo-Skelett**: `repository.yaml`, `README.md`, `CLAUDE.md` im Root.
 2. **PoC-Benchmark** (kritischer Risiko-Mitigation-Step): Minimales
    Python-Skript, das Gemma 2B (int8-Quantisierung, offizieller
-   Google-LiteRT-`.task`-Build) via `ai-edge-litert` lädt, 100 Tokens
-   generiert und Token-Rate misst. **Akzeptanzkriterium: ≥ 5 tok/s
-   sustained über mind. 100 generierte Tokens** auf der Ziel-NUC-Hardware.
-   Bei Unterschreitung wird der Plan unterbrochen und die Engine-Wahl
-   re-evaluiert (Kandidat: `llama-cpp-python` hinter demselben
-   `InferenceService`-Protocol). Ergebnis dokumentieren in
-   `docs/benchmarks/2026-05-XX-litert-gemma2b.md`.
+   Google-LiteRT-`.task`-Build) via `litert_lm.Benchmark` (Backend.CPU)
+   misst. **Akzeptanzkriterium: `last_decode_tokens_per_second` ≥ 5 tok/s**
+   auf der Ziel-NUC-Hardware. Bei Unterschreitung wird der Plan
+   unterbrochen und die Engine-Wahl re-evaluiert (Kandidat:
+   `llama-cpp-python` hinter demselben `InferenceService`-Protocol).
+   Ergebnis dokumentieren in `docs/benchmarks/2026-05-XX-litert-gemma2b.md`.
 3. **Domain-Schicht**: `types.py`, `inference.py`, `model_registry.py`
    (nur Protocols + Models, keine Implementierung). Tests gegen
    `FakeEngine`.

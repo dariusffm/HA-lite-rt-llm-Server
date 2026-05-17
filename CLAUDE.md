@@ -58,8 +58,7 @@ __main__.py     # FastAPI app construction. The ONLY place where concrete
 - `domain/` has no imports from `engines/`, `adapters/`, or `model_registry/`.
 - `adapters/openai_router.py` and `adapters/ollama_router.py` may import
   `domain/` types and call services typed against `domain/` Protocols. They
-  must **never** import `mediapipe_genai`, `ai_edge_litert`, or
-  `huggingface_hub` directly.
+  must **never** import `litert_lm` or `huggingface_hub` directly.
 - Streaming: the domain returns `AsyncIterator[Token]`. SSE framing
   (OpenAI) and NDJSON framing (Ollama) lives in the respective adapter — not
   in the engine and not in the service.

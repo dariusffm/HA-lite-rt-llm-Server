@@ -6,7 +6,7 @@
 
 **Architecture:** Ports & Adapters (Hexagonal). Two HTTP protocol adapters (OpenAI, Ollama) talk to a single `InferenceService` Protocol implemented by `LiteRTEngine`. A `ModelRegistry` Protocol handles model downloads via HuggingFace. The HA add-on wrapper (s6-overlay + bashio) is a thin shell around the Python app; bashio is the only translator from `config.yaml` to environment variables.
 
-**Tech Stack:** Python 3.12, FastAPI, uvicorn, pydantic v2, pydantic-settings, ai-edge-litert, mediapipe-genai, huggingface_hub, pytest + pytest-asyncio, httpx, ruff, mypy, import-linter, uv. Container base: `ghcr.io/hassio-addons/base-python:14.0.2`.
+**Tech Stack:** Python 3.12, FastAPI, uvicorn, pydantic v2, pydantic-settings, litert-lm-api, huggingface_hub, pytest + pytest-asyncio, httpx, ruff, mypy, import-linter, uv. Container base: `ghcr.io/hassio-addons/base-python:14.0.2`.
 
 **Reference spec:** `docs/superpowers/specs/2026-05-16-homeassistant-addons-repo-design.md`
 
@@ -184,8 +184,7 @@ dependencies = [
     "pydantic-settings>=2.6",
     "httpx>=0.27",
     "huggingface-hub>=0.26",
-    "ai-edge-litert>=1.0",
-    "mediapipe>=0.10.18",
+    "litert-lm-api>=0.11.0",
 ]
 
 [project.optional-dependencies]
@@ -258,11 +257,10 @@ uv sync --extra dev
 ```
 Expected: virtualenv created at `.venv/`, dependencies installed without error.
 
-> **Note:** If `ai-edge-litert` or `mediapipe-genai` fails to resolve on
-> macOS for local dev — that is acceptable here. The benchmark in Task 4
-> must run on the **target amd64 Linux machine**. For macOS-only dev,
-> temporarily comment out `ai-edge-litert` and `mediapipe` in
-> `pyproject.toml`; uncomment before running the benchmark on Linux.
+> **Note:** `litert-lm-api` ships self-contained wheels and installs
+> cleanly on macOS-arm64 and Linux-amd64. The benchmark in Task 5 must
+> still run on the **target amd64 Linux machine** for representative
+> tok/s numbers. Local imports + `uv sync` should succeed on macOS too.
 
 - [ ] **Step 6: Commit**
 
@@ -281,11 +279,15 @@ git commit -m "feat(litert): add pyproject.toml with uv-managed deps"
 - [ ] **Step 1: Create `litert-llm-server/app/scripts/bench_gemma2b.py`**
 
 ```python
-"""PoC benchmark: measure LiteRT Gemma 2B sustained token rate.
+"""PoC benchmark: measure LiteRT-LM Gemma 2B sustained decode token rate.
 
-Acceptance criterion (from spec): >= 5 tok/s sustained over 100 generated
-tokens on the target amd64 hardware. Below that, the engine choice must be
-re-evaluated before continuing.
+Acceptance criterion (from spec): >= 5 tok/s sustained decode rate on the
+target amd64 hardware. Below that, the engine choice must be re-evaluated
+before continuing.
+
+Uses litert-lm-api's built-in `Benchmark`, which reports the canonical
+`last_decode_tokens_per_second` metric (token generation speed, NOT prompt
+prefill).
 
 Run on the actual target NUC/server:
     cd litert-llm-server/app
@@ -296,20 +298,15 @@ from __future__ import annotations
 
 import os
 import sys
-import time
 from pathlib import Path
 
 from huggingface_hub import hf_hub_download
-from mediapipe.tasks.python.genai import bundler  # noqa: F401  (sanity import)
-from mediapipe.tasks.python.genai.inference import (
-    LlmInference,
-    LlmInferenceOptions,
-)
+from litert_lm import Backend, Benchmark
 
 MODEL_REPO = "google/gemma-2-2b-it-tflite"
 MODEL_FILE = "gemma-2-2b-it-q8.task"
-PROMPT = "Write a short paragraph about home automation."
-NUM_TOKENS = 100
+PREFILL_TOKENS = 256
+DECODE_TOKENS = 128
 ACCEPTANCE_TOK_S = 5.0
 
 
@@ -323,43 +320,31 @@ def download_model(cache_dir: Path) -> Path:
     return Path(path)
 
 
-def benchmark(model_path: Path) -> float:
-    print(f"Loading model: {model_path}")
-    options = LlmInferenceOptions(
-        model_path=str(model_path),
-        max_tokens=NUM_TOKENS + 32,
-        random_seed=42,
-        top_k=40,
-        temperature=0.7,
-    )
-    llm = LlmInference.create_from_options(options)
-
-    print(f"Generating {NUM_TOKENS} tokens for prompt: {PROMPT!r}")
-    start = time.perf_counter()
-    output = llm.generate_response(PROMPT)
-    elapsed = time.perf_counter() - start
-
-    # Heuristic: split output into "tokens" by whitespace for a coarse
-    # tok/s. The MediaPipe API does not stream token-by-token in this
-    # synchronous call; this is good enough for the gate decision.
-    token_count = max(len(output.split()), 1)
-    tok_per_s = token_count / elapsed
-    print(f"Generated {token_count} tokens in {elapsed:.2f}s -> {tok_per_s:.2f} tok/s")
-    return tok_per_s
-
-
 def main() -> int:
     cache_dir = Path(os.environ.get("LITERT_BENCH_CACHE", "./.models"))
     cache_dir.mkdir(parents=True, exist_ok=True)
     model_path = download_model(cache_dir)
-    tok_per_s = benchmark(model_path)
+
+    print(f"Running LiteRT-LM benchmark on {model_path} (Backend.CPU) ...")
+    bench = Benchmark(
+        model_path=str(model_path),
+        backend=Backend.CPU,
+        prefill_tokens=PREFILL_TOKENS,
+        decode_tokens=DECODE_TOKENS,
+    )
+    info = bench.run()
 
     print("\n=== RESULT ===")
-    print(f"Sustained rate: {tok_per_s:.2f} tok/s (acceptance: >= {ACCEPTANCE_TOK_S} tok/s)")
-    if tok_per_s < ACCEPTANCE_TOK_S:
+    print(f"init_time:                       {info.init_time_in_second:.2f}s")
+    print(f"time_to_first_token:             {info.time_to_first_token_in_second:.2f}s")
+    print(f"prefill_tokens_per_second:       {info.last_prefill_tokens_per_second:.2f}")
+    print(f"decode_tokens_per_second:        {info.last_decode_tokens_per_second:.2f}")
+    print(f"acceptance threshold (decode):   >= {ACCEPTANCE_TOK_S} tok/s")
+
+    if info.last_decode_tokens_per_second < ACCEPTANCE_TOK_S:
         print("BELOW ACCEPTANCE THRESHOLD — stop and re-evaluate engine choice.")
         return 1
-    print("Above threshold — proceed with LiteRT engine.")
+    print("Above threshold — proceed with LiteRT-LM engine.")
     return 0
 
 
@@ -2151,30 +2136,29 @@ git commit -m "feat(litert/adapters): add Ollama /api/show and /api/delete"
 - Create: `litert-llm-server/app/src/litert_server/engines/litert.py`
 - Create: `litert-llm-server/app/tests/engines/test_litert_engine.py`
 
-> **Note:** This task and Task 21 touch the actual MediaPipe LLM Inference
-> API. Tests use `pytest.importorskip` to skip on machines where
-> `mediapipe` is not installed (e.g., macOS dev). The CI gate is the
-> Docker smoke test in Phase 11.
+> **Note:** This task and Task 21 use `litert-lm-api` (`litert_lm.Engine`
+> / `Session`). The package ships self-contained wheels for
+> macOS-arm64 and Linux-amd64 and should be installed via `uv sync`.
+> Tests that touch a real model file are guarded by an env var
+> (`LITERT_TEST_MODEL_PATH`); construction-only tests run anywhere.
 
 - [ ] **Step 1: Write the failing test**
 
 Create `litert-llm-server/app/tests/engines/test_litert_engine.py`:
 
 ```python
-import pytest
+from pathlib import Path
 
-mediapipe = pytest.importorskip("mediapipe")  # noqa: F841
-
-from litert_server.engines.litert import LiteRTEngine  # noqa: E402
+from litert_server.engines.litert import LiteRTEngine
 
 
-def test_engine_construction_does_not_load_model(tmp_path):
+def test_engine_construction_does_not_load_model(tmp_path: Path):
     engine = LiteRTEngine(models_dir=tmp_path)
     assert engine.models_dir == tmp_path
     assert engine.current_model is None
 ```
 
-- [ ] **Step 2: Run test (expect import fail or skip)**
+- [ ] **Step 2: Run test (expect import fail)**
 
 ```bash
 uv run pytest tests/engines/ -v
@@ -2185,11 +2169,11 @@ uv run pytest tests/engines/ -v
 Create `litert-llm-server/app/src/litert_server/engines/litert.py`:
 
 ```python
-"""LiteRT-backed `InferenceService` implementation.
+"""LiteRT-LM backed `InferenceService` implementation.
 
-Wraps MediaPipe's `LlmInference` API. Loads a model on first use and
-caches the loaded engine per model name (single-slot in MVP — second
-model triggers reload).
+Wraps `litert_lm.Engine`. Loads a model on first use and caches the
+loaded engine per model name (single-slot in MVP — second model triggers
+reload).
 """
 
 from __future__ import annotations
@@ -2203,31 +2187,38 @@ from litert_server.domain.types import GenerationParams, Token
 
 
 class LiteRTEngine:
-    """Single-slot LiteRT engine.
+    """Single-slot LiteRT-LM engine.
 
-    Thread-safety: model swaps are serialized via a Lock. Inference itself
-    is delegated to MediaPipe's synchronous API; we wrap it in
-    `run_in_executor` in `stream_completion`.
+    Thread-safety: model swaps are serialized via a Lock. The
+    `litert_lm.Engine` C-API itself is synchronous; we wrap streaming
+    iteration in `asyncio.to_thread` in `stream_completion` (Task 21).
     """
 
     def __init__(self, *, models_dir: Path) -> None:
         self.models_dir = models_dir
         self._lock = Lock()
         self.current_model: str | None = None
-        self._llm: Any | None = None
+        self._engine: Any | None = None
 
-    def _ensure_loaded(self, model_name: str, model_file: Path) -> None:
-        # Mediapipe import is lazy to keep import-time light.
-        from mediapipe.tasks.python.genai.inference import (
-            LlmInference,
-            LlmInferenceOptions,
-        )
+    def _model_file(self, model_name: str) -> Path:
+        # MVP mapping: <models_dir>/<model_name>.task
+        # ModelRegistry guarantees the file exists before engine sees it.
+        return self.models_dir / f"{model_name}.task"
+
+    def _ensure_loaded(self, model_name: str) -> None:
+        # litert_lm import is lazy to keep import-time light.
+        from litert_lm import Backend, Engine
 
         with self._lock:
-            if self.current_model == model_name and self._llm is not None:
+            if self.current_model == model_name and self._engine is not None:
                 return
-            options = LlmInferenceOptions(model_path=str(model_file))
-            self._llm = LlmInference.create_from_options(options)
+            file = self._model_file(model_name)
+            if not file.exists():
+                raise FileNotFoundError(f"Model file not found: {file}")
+            # Close previous engine if any (single-slot semantics).
+            if self._engine is not None:
+                self._engine.close()
+            self._engine = Engine(model_path=str(file), backend=Backend.CPU)
             self.current_model = model_name
 
     async def stream_completion(
@@ -2245,14 +2236,14 @@ class LiteRTEngine:
 ```bash
 uv run pytest tests/engines/ -v
 ```
-Expected: pass on machines with mediapipe; skip otherwise.
+Expected: pass.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add litert-llm-server/app/src/litert_server/engines/litert.py \
         litert-llm-server/app/tests/engines/test_litert_engine.py
-git commit -m "feat(litert/engines): add LiteRTEngine skeleton with lazy MediaPipe import"
+git commit -m "feat(litert/engines): add LiteRTEngine skeleton wrapping litert_lm.Engine"
 ```
 
 ---
@@ -2263,13 +2254,11 @@ git commit -m "feat(litert/engines): add LiteRTEngine skeleton with lazy MediaPi
 - Modify: `litert-llm-server/app/src/litert_server/engines/litert.py`
 - Modify: `litert-llm-server/app/tests/engines/test_litert_engine.py`
 
-> **Important constraint:** MediaPipe's `LlmInference.generate_response`
-> is synchronous and returns the full string, not a stream. To honor the
-> domain's `AsyncIterator[Token]` contract, we yield chunked tokens by
-> whitespace after running generation in a worker thread. This is a
-> documented MVP trade-off; true per-token streaming via
-> `LlmInferenceOptions` callbacks can be added later without changing the
-> Protocol.
+> **Streaming approach:** `litert_lm.Session` provides true per-token
+> iteration. The session is created from the loaded `Engine` and yields
+> tokens one at a time during decode. We iterate in a worker thread (via
+> `asyncio.to_thread` plus a queue/iterator bridge) so the async caller
+> sees an `AsyncIterator[Token]` without blocking the event loop.
 
 - [ ] **Step 1: Add the failing test**
 
@@ -2313,17 +2302,20 @@ uv run pytest tests/engines/ -v
 Replace `litert-llm-server/app/src/litert_server/engines/litert.py`:
 
 ```python
-"""LiteRT-backed `InferenceService` implementation."""
+"""LiteRT-LM backed `InferenceService` implementation."""
 
 from __future__ import annotations
 
 import asyncio
+import queue
 from collections.abc import AsyncIterator
 from pathlib import Path
-from threading import Lock
+from threading import Lock, Thread
 from typing import Any
 
 from litert_server.domain.types import GenerationParams, Token
+
+_SENTINEL: object = object()
 
 
 class LiteRTEngine:
@@ -2331,36 +2323,29 @@ class LiteRTEngine:
         self.models_dir = models_dir
         self._lock = Lock()
         self.current_model: str | None = None
-        self._llm: Any | None = None
+        self._engine: Any | None = None
 
     def _model_file(self, model_name: str) -> Path:
-        # MVP mapping: <models_dir>/<model_name>.task
-        # ModelRegistry guarantees the file exists before engine sees it.
         return self.models_dir / f"{model_name}.task"
 
     def _ensure_loaded(self, model_name: str) -> None:
-        from mediapipe.tasks.python.genai.inference import (
-            LlmInference,
-            LlmInferenceOptions,
-        )
+        from litert_lm import Backend, Engine
 
         with self._lock:
-            if self.current_model == model_name and self._llm is not None:
+            if self.current_model == model_name and self._engine is not None:
                 return
             file = self._model_file(model_name)
             if not file.exists():
                 raise FileNotFoundError(f"Model file not found: {file}")
-            options = LlmInferenceOptions(model_path=str(file))
-            self._llm = LlmInference.create_from_options(options)
+            if self._engine is not None:
+                self._engine.close()
+            self._engine = Engine(model_path=str(file), backend=Backend.CPU)
             self.current_model = model_name
 
-    def _generate_sync(self, prompt: str, params: GenerationParams) -> str:
-        assert self._llm is not None
-        # MediaPipe's options are set at engine-creation time in MVP.
-        # max_tokens/temperature are honored at create_from_options; for
-        # MVP we accept a one-shot generation. A later refactor can swap
-        # to per-call options when MediaPipe exposes them.
-        return self._llm.generate_response(prompt)
+    def _build_sampler(self, params: GenerationParams) -> Any:
+        from litert_lm import SamplerConfig
+
+        return SamplerConfig(temperature=params.temperature, top_p=params.top_p)
 
     async def stream_completion(
         self,
@@ -2369,23 +2354,46 @@ class LiteRTEngine:
         params: GenerationParams,
     ) -> AsyncIterator[Token]:
         await asyncio.to_thread(self._ensure_loaded, model)
-        text = await asyncio.to_thread(self._generate_sync, prompt, params)
+        assert self._engine is not None
 
-        # Coarse "tokenization" by whitespace boundary for streaming UX.
-        # See spec Section 3 / engine notes — this is the documented
-        # MVP trade-off until MediaPipe's per-token callback is wired.
-        parts = text.split(" ")
+        sampler = self._build_sampler(params)
+        session = self._engine.create_session(
+            sampler_config=sampler,
+            max_output_tokens=params.max_tokens,
+        )
+
+        q: queue.Queue[Any] = queue.Queue(maxsize=64)
+
+        def producer() -> None:
+            try:
+                for piece in session.generate_stream(prompt):
+                    q.put(piece)
+            except Exception as exc:  # surface to consumer
+                q.put(exc)
+            finally:
+                q.put(_SENTINEL)
+
+        Thread(target=producer, daemon=True).start()
+
+        loop = asyncio.get_running_loop()
         index = 0
-        for i, part in enumerate(parts):
-            is_last = i == len(parts) - 1
-            chunk = part if i == 0 else " " + part
-            yield Token(
-                text=chunk,
-                index=index,
-                finish_reason="stop" if is_last else None,
-            )
+        while True:
+            item = await loop.run_in_executor(None, q.get)
+            if item is _SENTINEL:
+                yield Token(text="", index=index, finish_reason="stop")
+                return
+            if isinstance(item, Exception):
+                raise item
+            yield Token(text=str(item), index=index, finish_reason=None)
             index += 1
 ```
+
+> **Note on `session.generate_stream`**: the exact method name on
+> `litert_lm.Session` may vary between API versions. If the installed
+> version exposes a different streaming entrypoint (e.g.
+> `session.generate`, `session.run`, or yielding via `Conversation`),
+> adjust the producer body to call that method. The contract this engine
+> provides — `AsyncIterator[Token]` — is unaffected.
 
 - [ ] **Step 4: Run test (skip without model)**
 
@@ -3016,8 +3024,7 @@ source_modules =
 forbidden_modules =
     litert_server.engines
     litert_server.model_registry
-    mediapipe
-    ai_edge_litert
+    litert_lm
     huggingface_hub
 ```
 
@@ -3537,8 +3544,16 @@ No "TBD" / "TODO" / "implement later" markers. The `<fill in>` placeholders in b
 
 **4. Open items**
 
-- `mediapipe-genai` package name in `pyproject.toml` may need adjustment depending on the actual PyPI release (Task 3 lists `mediapipe` which provides the `mediapipe.tasks.python.genai` namespace). If `uv sync` fails, switch to `mediapipe>=0.10.18` (already listed) or the dedicated `mediapipe-genai` package if released.
-- Task 21 documents the per-token-streaming MVP trade-off (whitespace split). Real per-token streaming via MediaPipe callbacks can be added without changing the `InferenceService` Protocol.
+- Engine package: this plan uses `litert-lm-api` (Google's current Python
+  wrapper over LiteRT-LM). The original draft referenced
+  `mediapipe.tasks.python.genai.inference.LlmInference`, which is
+  deprecated and no longer present in current `mediapipe` PyPI builds.
+  Updated 2026-05-17; see Spec Section 3 historical note.
+- Task 21 uses true per-token streaming via `litert_lm.Session`. If a
+  given `litert-lm-api` version exposes a different streaming method
+  name, the producer thread body in `engines/litert.py` needs the
+  corresponding adjustment (`generate_stream` vs alternative). The
+  `InferenceService` Protocol contract does not change.
 
 ---
 
