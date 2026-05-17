@@ -32,7 +32,8 @@ von CI-Workflows ist.
 | Modell-Lifecycle | Auto-Download via Ollama-kompatibler `/api/pull`-Endpoint; Cache unter `/data/models/` |
 | HTTP-APIs | OpenAI-kompatibel **und** Ollama-kompatibel parallel — beide aktiv |
 | Streaming | SSE (OpenAI) und NDJSON (Ollama) |
-| Architekturen | `amd64` only (x86_64 NUC/Server) |
+| Architekturen | `amd64` + `aarch64` (x86_64 NUC/Server **und** ARM64 Pi 4/5 / ARM-NUCs / Apple-Silicon-Docker). armv7/armhf/i386 sind out-of-scope (`litert-lm-api`-Wheels nicht verfügbar; LLM-Inferenz auf 32-bit ARM unbrauchbar). |
+| HuggingFace-Auth | Erforderlich: Gemma-`.task`-Repos auf HF sind gated. Add-on liest `HF_TOKEN` aus ENV (von bashio aus `config.yaml`-Option `hf_token` exportiert). User muss vorab Lizenz akzeptieren und Read-Token erstellen. |
 | Distribution | Lokal jetzt, Public Github + GHCR später (Struktur jetzt kompatibel) |
 | Eigner-Profil | Solo-Dev, MVP-fokussiert, schnelle Iteration |
 
@@ -173,6 +174,7 @@ slug: litert_llm_server
 description: "Local LLM inference via Google LiteRT with OpenAI- and Ollama-compatible APIs"
 arch:
   - amd64
+  - aarch64
 init: false
 startup: application
 boot: auto
@@ -188,6 +190,7 @@ options:
   max_tokens: 1024
   temperature: 0.7
   preload_models: []
+  hf_token: ""
 schema:
   log_level: list(trace|debug|info|notice|warning|error|fatal)
   default_model: str
@@ -195,13 +198,22 @@ schema:
   temperature: float(0.0,2.0)
   preload_models:
     - str
+  hf_token: password?
 ```
+
+> **Anmerkung zu `hf_token`**: HA-Add-on-Schema-Typ `password?` ist
+> optional und wird in der HA-UI maskiert dargestellt. Der Wert wird via
+> bashio als `HF_TOKEN` ENV-Variable exportiert — die Variable, die
+> `huggingface_hub` standardmäßig liest. Ohne Token sind Gemma-Modelle
+> nicht abrufbar (gated repository).
 
 ### `litert-llm-server/Dockerfile`
 
 ```dockerfile
 ARG BUILD_FROM
 FROM $BUILD_FROM
+
+ARG BUILD_ARCH
 
 ENV LANG=C.UTF-8 \
     PYTHONUNBUFFERED=1 \
@@ -219,7 +231,7 @@ COPY rootfs/ /
 
 LABEL io.hass.version="0.1.0" \
       io.hass.type="addon" \
-      io.hass.arch="amd64"
+      io.hass.arch="${BUILD_ARCH}"
 ```
 
 ### `litert-llm-server/build.yaml`
@@ -227,6 +239,7 @@ LABEL io.hass.version="0.1.0" \
 ```yaml
 build_from:
   amd64: ghcr.io/hassio-addons/base-python:14.0.2
+  aarch64: ghcr.io/hassio-addons/base-python:14.0.2
 labels:
   org.opencontainers.image.source: "https://github.com/USER/homassist-addons"
 ```
@@ -249,7 +262,14 @@ export LITERT_PORT="8080"
 LITERT_PRELOAD_MODELS="$(bashio::config 'preload_models')"
 export LITERT_PRELOAD_MODELS
 
-printenv | grep '^LITERT_' > /var/run/s6/container_environment/litert.env
+# HuggingFace token: exported as HF_TOKEN (the env var huggingface_hub reads
+# by default). Required for downloading gated Gemma .task repos.
+HF_TOKEN_VALUE="$(bashio::config 'hf_token')"
+if [ -n "${HF_TOKEN_VALUE}" ]; then
+    export HF_TOKEN="${HF_TOKEN_VALUE}"
+fi
+
+printenv | grep -E '^(LITERT_|HF_TOKEN$)' > /var/run/s6/container_environment/litert.env
 ```
 
 ### `rootfs/etc/services.d/litert/run`
@@ -496,14 +516,16 @@ uv run mypy src/
 Building the add-on container locally (slow on first run):
 
 ```bash
-# From <addon-name>/
+# From <addon-name>/  (set BUILD_ARCH to the host's HA arch: amd64 or aarch64)
 docker build \
   --build-arg BUILD_FROM=ghcr.io/hassio-addons/base-python:14.0.2 \
+  --build-arg BUILD_ARCH=amd64 \
   -t local/litert-llm-server:dev .
 
 # Run standalone for smoke tests (no HA supervisor)
 docker run --rm -p 8080:8080 \
   -e LITERT_DEFAULT_MODEL=gemma-2b-it \
+  -e HF_TOKEN=hf_xxx \
   -v $(pwd)/.models:/data/models \
   local/litert-llm-server:dev
 ```

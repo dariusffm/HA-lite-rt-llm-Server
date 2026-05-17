@@ -2653,6 +2653,7 @@ MODEL_CATALOG: dict[str, CatalogEntry] = {
 @dataclass
 class HuggingFaceRegistry:
     cache: FilesystemCache
+    hf_token: str | None = None  # injected by __main__ from Settings.hf_token
 
     async def list(self) -> list[ModelInfo]:
         return self.cache.scan()
@@ -2679,11 +2680,12 @@ class HuggingFaceRegistry:
                 repo_id=entry.repo_id,
                 filename=entry.filename,
                 cache_dir=str(self.cache.root / ".hf_cache"),
+                token=self.hf_token,  # None -> falls back to HF_TOKEN env var
             )
 
         try:
             tmp_path = await asyncio.to_thread(_download)
-        except Exception as exc:  # network, auth, 404 — surface as error
+        except Exception as exc:  # network, auth (401), 404 — surface as error
             yield PullProgress(
                 bytes_done=0, bytes_total=0, status="error", error=str(exc)
             )
@@ -2698,6 +2700,13 @@ class HuggingFaceRegistry:
     async def delete(self, name: str) -> None:
         self.cache.delete(name)
 ```
+
+> **Note on auth**: Google's Gemma `.task` repositories on HuggingFace are
+> **gated** — anonymous downloads return 401. The token is forwarded
+> explicitly via the `token=` kwarg; passing `None` lets `huggingface_hub`
+> fall back to the `HF_TOKEN` environment variable (set by bashio from
+> the `hf_token` add-on option). Users must first accept the Gemma
+> license on the HuggingFace model page and create a read-scope token.
 
 - [ ] **Step 4: Run tests**
 
@@ -2743,6 +2752,7 @@ def test_settings_reads_env(monkeypatch):
     monkeypatch.setenv("LITERT_MODELS_DIR", "/data/models")
     monkeypatch.setenv("LITERT_PORT", "8080")
     monkeypatch.setenv("LITERT_PRELOAD_MODELS", json.dumps(["gemma-2b-it"]))
+    monkeypatch.setenv("HF_TOKEN", "hf_xxx")
     s = Settings()
     assert s.log_level == "debug"
     assert s.default_model == "gemma-2b-it"
@@ -2751,15 +2761,17 @@ def test_settings_reads_env(monkeypatch):
     assert str(s.models_dir) == "/data/models"
     assert s.port == 8080
     assert s.preload_models == ["gemma-2b-it"]
+    assert s.hf_token == "hf_xxx"
 
 
 def test_settings_defaults(monkeypatch):
     for k in list(os.environ):
-        if k.startswith("LITERT_"):
+        if k.startswith("LITERT_") or k == "HF_TOKEN":
             monkeypatch.delenv(k, raising=False)
     s = Settings()
     assert s.log_level == "info"
     assert s.preload_models == []
+    assert s.hf_token is None
 ```
 
 - [ ] **Step 2: Run test (expect import fail)**
@@ -2795,6 +2807,11 @@ LogLevel = Literal[
 
 
 class Settings(BaseSettings):
+    """Settings exposed via the LITERT_* env-var prefix, plus a special
+    `hf_token` field that reads the **un-prefixed** `HF_TOKEN` env var (the
+    standard variable that `huggingface_hub` recognizes by default).
+    """
+
     model_config = SettingsConfigDict(env_prefix="LITERT_", extra="ignore")
 
     log_level: LogLevel = "info"
@@ -2804,6 +2821,7 @@ class Settings(BaseSettings):
     models_dir: Path = Path("/data/models")
     port: int = 8080
     preload_models: list[str] = []
+    hf_token: str | None = Field(default=None, validation_alias="HF_TOKEN")
 
     @field_validator("preload_models", mode="before")
     @classmethod
@@ -2814,6 +2832,21 @@ class Settings(BaseSettings):
                 return []
             return json.loads(v)
         return v
+
+    @field_validator("hf_token", mode="before")
+    @classmethod
+    def _empty_token_is_none(cls, v):
+        # bashio exports HF_TOKEN even when blank in HA UI; treat "" as None
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+```
+
+Also update the import line at the top of the file: add `Field` to the
+pydantic import:
+
+```python
+from pydantic import Field, field_validator
 ```
 
 - [ ] **Step 4: Run test**
@@ -2935,7 +2968,7 @@ def _build_production_app() -> FastAPI:
 
     settings = Settings()
     cache = FilesystemCache(root=settings.models_dir)
-    registry = HuggingFaceRegistry(cache=cache)
+    registry = HuggingFaceRegistry(cache=cache, hf_token=settings.hf_token)
     engine = LiteRTEngine(models_dir=settings.models_dir)
     return build_app(engine=engine, registry=registry)
 
@@ -3061,6 +3094,7 @@ slug: litert_llm_server
 description: "Local LLM inference via Google LiteRT with OpenAI- and Ollama-compatible APIs"
 arch:
   - amd64
+  - aarch64
 init: false
 startup: application
 boot: auto
@@ -3076,6 +3110,7 @@ options:
   max_tokens: 1024
   temperature: 0.7
   preload_models: []
+  hf_token: ""
 schema:
   log_level: list(trace|debug|info|notice|warning|error|fatal)
   default_model: str
@@ -3083,6 +3118,7 @@ schema:
   temperature: float(0.0,2.0)
   preload_models:
     - str
+  hf_token: password?
 ```
 
 - [ ] **Step 2: Create `litert-llm-server/build.yaml`**
@@ -3090,6 +3126,7 @@ schema:
 ```yaml
 build_from:
   amd64: ghcr.io/hassio-addons/base-python:14.0.2
+  aarch64: ghcr.io/hassio-addons/base-python:14.0.2
 labels:
   org.opencontainers.image.source: "https://github.com/USER/homassist-addons"
 ```
@@ -3122,6 +3159,8 @@ git commit -m "feat(litert): add HA add-on config.yaml and build.yaml"
 ARG BUILD_FROM
 FROM $BUILD_FROM
 
+ARG BUILD_ARCH
+
 ENV LANG=C.UTF-8 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
@@ -3138,7 +3177,7 @@ COPY rootfs/ /
 
 LABEL io.hass.version="0.1.0" \
       io.hass.type="addon" \
-      io.hass.arch="amd64"
+      io.hass.arch="${BUILD_ARCH}"
 ```
 
 - [ ] **Step 2: Create `litert-llm-server/.dockerignore`**
@@ -3185,7 +3224,14 @@ export LITERT_PORT="8080"
 LITERT_PRELOAD_MODELS="$(bashio::config 'preload_models')"
 export LITERT_PRELOAD_MODELS
 
-printenv | grep '^LITERT_' > /var/run/s6/container_environment/litert.env
+# HuggingFace token: exported as HF_TOKEN (the env var huggingface_hub reads
+# by default). Required for downloading gated Gemma .task repos.
+HF_TOKEN_VALUE="$(bashio::config 'hf_token')"
+if [ -n "${HF_TOKEN_VALUE}" ]; then
+    export HF_TOKEN="${HF_TOKEN_VALUE}"
+fi
+
+printenv | grep -E '^(LITERT_|HF_TOKEN$)' > /var/run/s6/container_environment/litert.env
 ```
 
 - [ ] **Step 2: Make executable**
@@ -3284,6 +3330,23 @@ integration and any Ollama-compatible client (Node-RED nodes, Open WebUI, …).
 Models are downloaded on demand via the Ollama-compatible `/api/pull`
 endpoint. See `DOCS.md` for usage.
 
+## Prerequisites — HuggingFace Access for Gemma
+
+Google's Gemma `.task` repositories on HuggingFace are **gated**. Before
+the add-on can download any Gemma model:
+
+1. Sign in at <https://huggingface.co/>.
+2. Open the model page (e.g.
+   <https://huggingface.co/google/gemma-2-2b-it-tflite>) and accept the
+   Gemma license.
+3. Create a **read-scope access token** at
+   <https://huggingface.co/settings/tokens>.
+4. Paste the token into the `hf_token` add-on option (it is stored as a
+   password-type field and never appears in logs).
+
+Without a valid token, `/api/pull` requests for Gemma models will fail
+with HTTP 401.
+
 ## Configuration
 
 | Option | Default | Description |
@@ -3293,6 +3356,7 @@ endpoint. See `DOCS.md` for usage.
 | `max_tokens` | 1024 | Hard upper bound for any request |
 | `temperature` | 0.7 | Default sampling temperature |
 | `preload_models` | `[]` | Model names to pull on startup |
+| `hf_token` | `""` | HuggingFace read token; required for Gemma downloads. |
 ```
 
 - [ ] **Step 2: Create `litert-llm-server/DOCS.md`**
@@ -3375,8 +3439,10 @@ git commit -m "docs(litert): add README, DOCS, and CHANGELOG"
 Run from the repo root:
 
 ```bash
+# Pick BUILD_ARCH to match your host (amd64 on x86, aarch64 on ARM64).
 docker build \
   --build-arg BUILD_FROM=ghcr.io/hassio-addons/base-python:14.0.2 \
+  --build-arg BUILD_ARCH=amd64 \
   -t local/litert-llm-server:dev \
   litert-llm-server
 ```

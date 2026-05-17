@@ -91,14 +91,16 @@ uv run mypy src/
 Building the add-on container locally (slow on first run):
 
 ```bash
-# From <addon-name>/
+# From <addon-name>/  (set BUILD_ARCH to the host's HA arch: amd64 or aarch64)
 docker build \
   --build-arg BUILD_FROM=ghcr.io/hassio-addons/base-python:14.0.2 \
+  --build-arg BUILD_ARCH=amd64 \
   -t local/litert-llm-server:dev .
 
 # Run standalone for smoke tests (no HA supervisor)
 docker run --rm -p 8080:8080 \
   -e LITERT_DEFAULT_MODEL=gemma-2b-it \
+  -e HF_TOKEN=hf_xxx \
   -v $(pwd)/.models:/data/models \
   local/litert-llm-server:dev
 ```
