@@ -1,4 +1,4 @@
-"""PoC benchmark: measure LiteRT-LM Gemma 2B sustained decode token rate.
+"""PoC benchmark: measure LiteRT-LM Gemma-4-E2B sustained decode token rate.
 
 Acceptance criterion (from spec): >= 5 tok/s sustained decode rate on the
 target amd64 hardware. Below that, the engine choice must be re-evaluated
@@ -22,8 +22,8 @@ from pathlib import Path
 from huggingface_hub import hf_hub_download
 from litert_lm import Backend, Benchmark
 
-MODEL_REPO = "google/gemma-2-2b-it-tflite"
-MODEL_FILE = "gemma-2-2b-it-q8.task"
+MODEL_REPO = "litert-community/gemma-4-E2B-it-litert-lm"
+MODEL_FILE = "gemma-4-E2B-it.litertlm"
 PREFILL_TOKENS = 256
 DECODE_TOKENS = 128
 ACCEPTANCE_TOK_S = 5.0

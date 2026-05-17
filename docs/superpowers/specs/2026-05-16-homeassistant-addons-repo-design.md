@@ -28,12 +28,12 @@ von CI-Workflows ist.
 | Repository-Manifest | `repository.yaml` im Repo-Root |
 | Erstes Add-on | `litert-llm-server` |
 | Inferenz-Engine | Google LiteRT-LM (via `litert-lm-api`) |
-| Unterstützte Modelle (MVP) | Mehrere parallel auswählbar: Gemma 2B, Gemma 3-1B, Gemma 3-4B. Phi-2 wurde aus dem MVP gestrichen (siehe Sektion 3, Risiken). |
+| Unterstützte Modelle (MVP) | Mehrere parallel auswählbar: Gemma 4 E2B (default), Gemma 4 E4B, Gemma 3n E2B, Gemma 3n E4B. Alle als offizielle `.litertlm`-Builds — `litert-community/*` (nicht gated, kein Token nötig) und `google/*` (gated, HF-Token erforderlich). |
 | Modell-Lifecycle | Auto-Download via Ollama-kompatibler `/api/pull`-Endpoint; Cache unter `/data/models/` |
 | HTTP-APIs | OpenAI-kompatibel **und** Ollama-kompatibel parallel — beide aktiv |
 | Streaming | SSE (OpenAI) und NDJSON (Ollama) |
 | Architekturen | `amd64` + `aarch64` (x86_64 NUC/Server **und** ARM64 Pi 4/5 / ARM-NUCs / Apple-Silicon-Docker). armv7/armhf/i386 sind out-of-scope (`litert-lm-api`-Wheels nicht verfügbar; LLM-Inferenz auf 32-bit ARM unbrauchbar). |
-| HuggingFace-Auth | Erforderlich: Gemma-`.task`-Repos auf HF sind gated. Add-on liest `HF_TOKEN` aus ENV (von bashio aus `config.yaml`-Option `hf_token` exportiert). User muss vorab Lizenz akzeptieren und Read-Token erstellen. |
+| HuggingFace-Auth | Erforderlich für `google/*-litert-lm`-Repos (Gemma 3n): diese sind gated. `litert-community/*-litert-lm`-Repos (Gemma 4) sind public. Add-on liest `HF_TOKEN` aus ENV (von bashio aus `config.yaml`-Option `hf_token` exportiert) — optional, nur für gated Repos nötig. |
 | Distribution | Lokal jetzt, Public Github + GHCR später (Struktur jetzt kompatibel) |
 | Eigner-Profil | Solo-Dev, MVP-fokussiert, schnelle Iteration |
 
@@ -79,36 +79,55 @@ Begründung (Konsens zweier unabhängiger Architektur-Reviews):
 
 **LiteRT-Performance auf CPU-only amd64 ist drastisch hinter dem
 Marketing.** Auf x86 ohne GPU-Delegate läuft LiteRT auf XNNPACK. Realistisch
-zu erwartende Token-Raten:
-
-- Gemma 2B: 2–5 tok/s
-- Gemma 3-4B: ggf. unbrauchbar langsam
+zu erwartende Token-Raten für Gemma-4-E2B (int4) liegen im einstelligen
+bis niedrig-zweistelligen tok/s-Bereich. Größere Varianten (E4B) können
+auf CPU schon grenzwertig sein.
 
 Zum Vergleich: `llama.cpp` mit GGUF-Quants schafft auf identischer
-Hardware 15–30 tok/s.
+Hardware 15–30 tok/s für vergleichbar große Modelle.
 
 **Konsequenz für die Implementierung**: Der **erste Implementierungs-Step
-ist ein PoC-Benchmark** mit Gemma 2B auf der Ziel-Hardware. Der Benchmark
-nutzt `litert_lm.Benchmark` und reportet `last_decode_tokens_per_second`
-als das maßgebliche Akzeptanzkriterium. Ergebnis < 5 tok/s → Engine-Tausch
-(z. B. `llama-cpp-python`) wird erwogen, bevor der API-Layer ausgebaut
-wird. Die Ports-&-Adapters-Architektur erlaubt diesen Tausch ohne
-Eingriff in Router oder API-Schemas.
+ist ein PoC-Benchmark** mit Gemma-4-E2B auf der Ziel-Hardware. Der
+Benchmark nutzt `litert_lm.Benchmark` und reportet
+`last_decode_tokens_per_second` als das maßgebliche Akzeptanzkriterium.
+Ergebnis < 5 tok/s → Engine-Tausch (z. B. `llama-cpp-python`) wird
+erwogen, bevor der API-Layer ausgebaut wird. Die Ports-&-Adapters-Architektur
+erlaubt diesen Tausch ohne Eingriff in Router oder API-Schemas.
 
-**Zusätzliches Risiko**: Phi-2 existiert nicht als offizielles
-LiteRT-`.task`-File. Eigene Konvertierung via `ai-edge-torch` wäre
-erforderlich — wird **nicht** Teil des MVP. Phi-2 wird aus der Liste der
-am MVP unterstützten Modelle gestrichen; nur die offiziellen Gemma-Builds
-sind initial unterstützt. Phi-2 kann später nachgezogen werden, wenn
-Konvertierung gewünscht ist.
+**MVP-Modellliste (Stand 2026-05-17, korrigiert nach Smoke-Test)**
 
-**Korrigierte MVP-Modellliste**: Gemma 2B, Gemma 3-1B, Gemma 3-4B
-(offizielle Google-LiteRT-`.task`-Builds via HuggingFace/Kaggle).
+| Logischer Name | HF-Repo | Datei | Gated | Default? |
+|---|---|---|---|---|
+| `gemma-4-e2b` | `litert-community/gemma-4-E2B-it-litert-lm` | `gemma-4-E2B-it.litertlm` | nein | ✓ |
+| `gemma-4-e4b` | `litert-community/gemma-4-E4B-it-litert-lm` | `gemma-4-E4B-it.litertlm` | nein |  |
+| `gemma-3n-e2b` | `google/gemma-3n-E2B-it-litert-lm` | `gemma-3n-E2B-it-int4.litertlm` | ja (HF-Token erforderlich) |  |
+| `gemma-3n-e4b` | `google/gemma-3n-E4B-it-litert-lm` | `gemma-3n-E4B-it-int4.litertlm` | ja (HF-Token erforderlich) |  |
+
+Aus dem MVP gestrichen / nicht (mehr) relevant:
+- Gemma 2B / Gemma 3-1B / Gemma 3-4B (alte Modellgeneration, deren `google/gemma-X-Y-tflite`-Repos teilweise retired sind; Files-Format `.task` ist Vergangenheit)
+- Phi-2 (keine offiziellen LiteRT-LM-Builds vorhanden)
 
 **Aufgelöstes Risiko (2026-05-17)**: Die Sorge, dass MediaPipe keine
 echte Per-Token-Streaming-API biete und ein Whitespace-Chunking-Workaround
 nötig wäre, ist mit dem Wechsel auf `litert-lm-api` **hinfällig** —
 `litert_lm.Session` liefert nativ Token für Token aus dem Decode-Loop.
+
+### Modell-Kontextfenster
+
+Die LiteRT-LM-Modelle (Gemma 4 und Gemma 3n) unterstützen ein
+Kontextfenster von **bis zu 32k Tokens** (Prompt + Completion zusammen).
+Konsequenz für das Add-on-Schema:
+
+- `max_tokens` Upper Bound: **32768** (statt der ursprünglich angedachten
+  8192). Gilt sowohl für die HA-`config.yaml`-Option als auch für die
+  Request-Parameter in `/v1/chat/completions` und `/api/chat`.
+- Die effektive Output-Länge eines einzelnen Calls = `32768 − Prompt-Token`.
+  Wird das überschritten, schneidet `litert_lm.Session` ab oder wirft
+  einen Fehler; die Adapter sollen Tokens dann mit `finish_reason="length"`
+  beenden (statt 500).
+- Lange Multi-Turn-Conversations können das Kontextfenster aufzehren; ein
+  Truncation-Policy (älteste Messages droppen) ist out-of-scope MVP und
+  Aufgabe der `__main__.py`-Wiring im Folge-Refactor.
 
 ## 4. Repository-Layout
 
@@ -186,7 +205,7 @@ map:
   - share:rw
 options:
   log_level: info
-  default_model: "gemma-2b-it"
+  default_model: "gemma-4-e2b"
   max_tokens: 1024
   temperature: 0.7
   preload_models: []
@@ -194,7 +213,7 @@ options:
 schema:
   log_level: list(trace|debug|info|notice|warning|error|fatal)
   default_model: str
-  max_tokens: int(1,8192)
+  max_tokens: int(1,32768)
   temperature: float(0.0,2.0)
   preload_models:
     - str
@@ -263,7 +282,7 @@ LITERT_PRELOAD_MODELS="$(bashio::config 'preload_models')"
 export LITERT_PRELOAD_MODELS
 
 # HuggingFace token: exported as HF_TOKEN (the env var huggingface_hub reads
-# by default). Required for downloading gated Gemma .task repos.
+# by default). Required for downloading gated google/*-litert-lm repos.
 HF_TOKEN_VALUE="$(bashio::config 'hf_token')"
 if [ -n "${HF_TOKEN_VALUE}" ]; then
     export HF_TOKEN="${HF_TOKEN_VALUE}"
@@ -331,7 +350,7 @@ class Token(BaseModel):
     finish_reason: Literal["stop", "length", None] = None
 
 class ModelInfo(BaseModel):
-    name: str            # "gemma-2b-it"
+    name: str            # "gemma-4-e2b"
     size_bytes: int
     quantization: str    # "int4", "int8", "fp16"
     path: Path | None    # None = nicht lokal vorhanden
@@ -497,7 +516,7 @@ All commands assume you are in `<addon-name>/app/`. The Python app uses `uv`.
 uv sync
 
 # Run the server locally (no HA, no Docker) — reads ENV vars
-LITERT_DEFAULT_MODEL=gemma-2b-it \
+LITERT_DEFAULT_MODEL=gemma-4-e2b \
 LITERT_MODELS_DIR=./.models \
 LITERT_PORT=8080 \
   uv run uvicorn litert_server.__main__:app --reload
@@ -524,7 +543,7 @@ docker build \
 
 # Run standalone for smoke tests (no HA supervisor)
 docker run --rm -p 8080:8080 \
-  -e LITERT_DEFAULT_MODEL=gemma-2b-it \
+  -e LITERT_DEFAULT_MODEL=gemma-4-e2b \
   -e HF_TOKEN=hf_xxx \
   -v $(pwd)/.models:/data/models \
   local/litert-llm-server:dev
@@ -572,9 +591,9 @@ Nur grobe Reihenfolge — die Detail-Schritte kommen aus `writing-plans`.
 
 1. **Repo-Skelett**: `repository.yaml`, `README.md`, `CLAUDE.md` im Root.
 2. **PoC-Benchmark** (kritischer Risiko-Mitigation-Step): Minimales
-   Python-Skript, das Gemma 2B (int8-Quantisierung, offizieller
-   Google-LiteRT-`.task`-Build) via `litert_lm.Benchmark` (Backend.CPU)
-   misst. **Akzeptanzkriterium: `last_decode_tokens_per_second` ≥ 5 tok/s**
+   Python-Skript, das Gemma-4-E2B (int4-Quantisierung, offizieller
+   `litert-community/*-litert-lm`-Build) via `litert_lm.Benchmark`
+   (Backend.CPU) misst. **Akzeptanzkriterium: `last_decode_tokens_per_second` ≥ 5 tok/s**
    auf der Ziel-NUC-Hardware. Bei Unterschreitung wird der Plan
    unterbrochen und die Engine-Wahl re-evaluiert (Kandidat:
    `llama-cpp-python` hinter demselben `InferenceService`-Protocol).
@@ -606,7 +625,7 @@ Nur grobe Reihenfolge — die Detail-Schritte kommen aus `writing-plans`.
 
 ## 10. Offene Punkte für späteren Plan
 
-- Konkrete Modell-Namensschema-Mapping: Wie wird „gemma-2b-it" intern auf
+- Konkrete Modell-Namensschema-Mapping: Wie wird „gemma-4-e2b" intern auf
   HuggingFace-Repo + Datei aufgelöst? Hardcoded-Tabelle im MVP, Registry
   später.
 - Concurrency-Verhalten: Ein einziger Modell-Slot im RAM, zweiter

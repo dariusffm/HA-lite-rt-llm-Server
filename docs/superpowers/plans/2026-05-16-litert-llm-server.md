@@ -279,7 +279,7 @@ git commit -m "feat(litert): add pyproject.toml with uv-managed deps"
 - [ ] **Step 1: Create `litert-llm-server/app/scripts/bench_gemma2b.py`**
 
 ```python
-"""PoC benchmark: measure LiteRT-LM Gemma 2B sustained decode token rate.
+"""PoC benchmark: measure LiteRT-LM Gemma-4-E2B sustained decode token rate.
 
 Acceptance criterion (from spec): >= 5 tok/s sustained decode rate on the
 target amd64 hardware. Below that, the engine choice must be re-evaluated
@@ -303,8 +303,8 @@ from pathlib import Path
 from huggingface_hub import hf_hub_download
 from litert_lm import Backend, Benchmark
 
-MODEL_REPO = "google/gemma-2-2b-it-tflite"
-MODEL_FILE = "gemma-2-2b-it-q8.task"
+MODEL_REPO = "litert-community/gemma-4-E2B-it-litert-lm"
+MODEL_FILE = "gemma-4-E2B-it.litertlm"
 PREFILL_TOKENS = 256
 DECODE_TOKENS = 128
 ACCEPTANCE_TOK_S = 5.0
@@ -389,7 +389,7 @@ Expected: prints token rate. Capture the value.
 
 **Date:** 2026-05-16
 **Host:** <fill in: CPU model, RAM, kernel>
-**Model:** `google/gemma-2-2b-it-tflite` / `gemma-2-2b-it-q8.task`
+**Model:** `litert-community/gemma-4-E2B-it-litert-lm` / `gemma-4-E2B-it.litertlm`
 **Script:** `litert-llm-server/app/scripts/bench_gemma2b.py`
 **Prompt:** `"Write a short paragraph about home automation."`
 **Tokens generated:** 100 (whitespace-split heuristic)
@@ -468,7 +468,7 @@ def test_generation_params_clamps_via_validation():
 
 
 def test_model_info_path_is_optional():
-    m = ModelInfo(name="gemma-2b-it", size_bytes=1234, quantization="int8")
+    m = ModelInfo(name="gemma-4-e2b", size_bytes=1234, quantization="int8")
     assert m.path is None
 
 
@@ -508,7 +508,7 @@ FinishReason = Literal["stop", "length"] | None
 class GenerationParams(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    max_tokens: int = Field(ge=1, le=8192)
+    max_tokens: int = Field(ge=1, le=32768)
     temperature: float = Field(ge=0.0, le=2.0)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     stop: list[str] | None = None
@@ -832,8 +832,8 @@ from litert_server.domain.types import ModelInfo, PullProgress
 class FakeRegistry:
     models: dict[str, ModelInfo] = field(
         default_factory=lambda: {
-            "gemma-2b-it": ModelInfo(
-                name="gemma-2b-it", size_bytes=1_500_000_000, quantization="int8"
+            "gemma-4-e2b": ModelInfo(
+                name="gemma-4-e2b", size_bytes=1_500_000_000, quantization="int8"
             ),
         }
     )
@@ -943,7 +943,7 @@ async def test_list_models_returns_openai_shape(client: AsyncClient):
     body = r.json()
     assert body["object"] == "list"
     assert isinstance(body["data"], list)
-    assert any(item["id"] == "gemma-2b-it" for item in body["data"])
+    assert any(item["id"] == "gemma-4-e2b" for item in body["data"])
     for item in body["data"]:
         assert item["object"] == "model"
         assert "created" in item
@@ -1045,7 +1045,7 @@ async def test_chat_completion_non_streaming(
     client: AsyncClient, fake_engine: FakeEngine
 ):
     payload = {
-        "model": "gemma-2b-it",
+        "model": "gemma-4-e2b",
         "messages": [{"role": "user", "content": "Hi"}],
         "max_tokens": 50,
         "temperature": 0.5,
@@ -1055,7 +1055,7 @@ async def test_chat_completion_non_streaming(
     assert r.status_code == 200
     body = r.json()
     assert body["object"] == "chat.completion"
-    assert body["model"] == "gemma-2b-it"
+    assert body["model"] == "gemma-4-e2b"
     assert len(body["choices"]) == 1
     choice = body["choices"][0]
     assert choice["index"] == 0
@@ -1065,7 +1065,7 @@ async def test_chat_completion_non_streaming(
 
     assert len(fake_engine.calls) == 1
     call = fake_engine.calls[0]
-    assert call.model == "gemma-2b-it"
+    assert call.model == "gemma-4-e2b"
     assert "Hi" in call.prompt
     assert call.params.max_tokens == 50
     assert call.params.temperature == 0.5
@@ -1119,7 +1119,7 @@ class ChatMessage(BaseModel):
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: list[ChatMessage]
-    max_tokens: int = Field(default=512, ge=1, le=8192)
+    max_tokens: int = Field(default=512, ge=1, le=32768)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     stop: list[str] | None = None
@@ -1234,7 +1234,7 @@ from httpx import AsyncClient
 
 async def test_chat_completion_streaming_sse(client: AsyncClient):
     payload = {
-        "model": "gemma-2b-it",
+        "model": "gemma-4-e2b",
         "messages": [{"role": "user", "content": "Hi"}],
         "max_tokens": 50,
         "stream": True,
@@ -1401,7 +1401,7 @@ from httpx import AsyncClient
 
 async def test_legacy_completions_non_streaming(client: AsyncClient):
     payload = {
-        "model": "gemma-2b-it",
+        "model": "gemma-4-e2b",
         "prompt": "Once upon a time",
         "max_tokens": 20,
         "stream": False,
@@ -1410,7 +1410,7 @@ async def test_legacy_completions_non_streaming(client: AsyncClient):
     assert r.status_code == 200
     body = r.json()
     assert body["object"] == "text_completion"
-    assert body["model"] == "gemma-2b-it"
+    assert body["model"] == "gemma-4-e2b"
     assert body["choices"][0]["text"] == "Hello, world!"
     assert body["choices"][0]["finish_reason"] == "stop"
 ```
@@ -1429,7 +1429,7 @@ In `openai_router.py`, add the request/response models and route:
 class CompletionRequest(BaseModel):
     model: str
     prompt: str
-    max_tokens: int = Field(default=512, ge=1, le=8192)
+    max_tokens: int = Field(default=512, ge=1, le=32768)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     stop: list[str] | None = None
@@ -1542,7 +1542,7 @@ async def test_tags_returns_ollama_shape(ollama_client: AsyncClient):
     assert "models" in body
     assert len(body["models"]) == 1
     m = body["models"][0]
-    assert m["name"] == "gemma-2b-it"
+    assert m["name"] == "gemma-4-e2b"
     assert m["size"] == 1_500_000_000
     assert "modified_at" in m
     assert m["details"]["quantization_level"] == "int8"
@@ -1654,7 +1654,7 @@ from httpx import AsyncClient
 
 async def test_chat_streams_ndjson(ollama_client: AsyncClient):
     payload = {
-        "model": "gemma-2b-it",
+        "model": "gemma-4-e2b",
         "messages": [{"role": "user", "content": "Hi"}],
         "stream": True,
     }
@@ -1667,7 +1667,7 @@ async def test_chat_streams_ndjson(ollama_client: AsyncClient):
     assert len(chunks) >= 2
 
     for c in chunks[:-1]:
-        assert c["model"] == "gemma-2b-it"
+        assert c["model"] == "gemma-4-e2b"
         assert c["message"]["role"] == "assistant"
         assert c["done"] is False
 
@@ -1681,7 +1681,7 @@ async def test_chat_streams_ndjson(ollama_client: AsyncClient):
 
 async def test_chat_non_streaming(ollama_client: AsyncClient):
     payload = {
-        "model": "gemma-2b-it",
+        "model": "gemma-4-e2b",
         "messages": [{"role": "user", "content": "Hi"}],
         "stream": False,
     }
@@ -1826,7 +1826,7 @@ from httpx import AsyncClient
 
 
 async def test_generate_streams_ndjson(ollama_client: AsyncClient):
-    payload = {"model": "gemma-2b-it", "prompt": "Once upon a time", "stream": True}
+    payload = {"model": "gemma-4-e2b", "prompt": "Once upon a time", "stream": True}
     async with ollama_client.stream("POST", "/api/generate", json=payload) as r:
         assert r.status_code == 200
         assert r.headers["content-type"].startswith("application/x-ndjson")
@@ -1839,7 +1839,7 @@ async def test_generate_streams_ndjson(ollama_client: AsyncClient):
 
 
 async def test_generate_non_streaming(ollama_client: AsyncClient):
-    payload = {"model": "gemma-2b-it", "prompt": "x", "stream": False}
+    payload = {"model": "gemma-4-e2b", "prompt": "x", "stream": False}
     r = await ollama_client.post("/api/generate", json=payload)
     assert r.status_code == 200
     body = r.json()
@@ -1947,7 +1947,7 @@ from httpx import AsyncClient
 
 
 async def test_pull_streams_progress(ollama_client: AsyncClient):
-    payload = {"name": "gemma-3-1b-it", "stream": True}
+    payload = {"name": "gemma-3n-e2b", "stream": True}
     async with ollama_client.stream("POST", "/api/pull", json=payload) as r:
         assert r.status_code == 200
         assert r.headers["content-type"].startswith("application/x-ndjson")
@@ -2037,7 +2037,7 @@ from httpx import AsyncClient
 
 
 async def test_show_returns_metadata(ollama_client: AsyncClient):
-    r = await ollama_client.post("/api/show", json={"name": "gemma-2b-it"})
+    r = await ollama_client.post("/api/show", json={"name": "gemma-4-e2b"})
     assert r.status_code == 200
     body = r.json()
     assert body["details"]["quantization_level"] == "int8"
@@ -2051,11 +2051,11 @@ async def test_show_unknown_returns_404(ollama_client: AsyncClient):
 
 async def test_delete_removes_model(ollama_client: AsyncClient):
     r = await ollama_client.request(
-        "DELETE", "/api/delete", json={"name": "gemma-2b-it"}
+        "DELETE", "/api/delete", json={"name": "gemma-4-e2b"}
     )
     assert r.status_code == 200
     tags = (await ollama_client.get("/api/tags")).json()
-    assert all(m["name"] != "gemma-2b-it" for m in tags["models"])
+    assert all(m["name"] != "gemma-4-e2b" for m in tags["models"])
 ```
 
 - [ ] **Step 2: Run tests (expect 404 / 405)**
@@ -2201,9 +2201,9 @@ class LiteRTEngine:
         self._engine: Any | None = None
 
     def _model_file(self, model_name: str) -> Path:
-        # MVP mapping: <models_dir>/<model_name>.task
+        # MVP mapping: <models_dir>/<model_name>.litertlm
         # ModelRegistry guarantees the file exists before engine sees it.
-        return self.models_dir / f"{model_name}.task"
+        return self.models_dir / f"{model_name}.litertlm"
 
     def _ensure_loaded(self, model_name: str) -> None:
         # litert_lm import is lazy to keep import-time light.
@@ -2282,7 +2282,7 @@ async def test_stream_completion_yields_tokens(tmp_path):
     engine = LiteRTEngine(models_dir=model_path.parent)
     tokens = []
     async for tok in engine.stream_completion(
-        model="gemma-2b-it",
+        model="gemma-4-e2b",
         prompt="Hello",
         params=GenerationParams(max_tokens=8, temperature=0.0),
     ):
@@ -2326,7 +2326,7 @@ class LiteRTEngine:
         self._engine: Any | None = None
 
     def _model_file(self, model_name: str) -> Path:
-        return self.models_dir / f"{model_name}.task"
+        return self.models_dir / f"{model_name}.litertlm"
 
     def _ensure_loaded(self, model_name: str) -> None:
         from litert_lm import Backend, Engine
@@ -2432,23 +2432,23 @@ from litert_server.model_registry.filesystem import FilesystemCache
 
 
 def test_lists_files_with_known_extension(tmp_path: Path):
-    (tmp_path / "gemma-2b-it.task").write_bytes(b"x" * 1024)
+    (tmp_path / "gemma-4-e2b.litertlm").write_bytes(b"x" * 1024)
     (tmp_path / "random.txt").write_text("ignore me")
     cache = FilesystemCache(root=tmp_path)
     names = [m.name for m in cache.scan()]
-    assert names == ["gemma-2b-it"]
+    assert names == ["gemma-4-e2b"]
 
 
 def test_size_reflects_file_size(tmp_path: Path):
-    (tmp_path / "x.task").write_bytes(b"a" * 4096)
+    (tmp_path / "x.litertlm").write_bytes(b"a" * 4096)
     cache = FilesystemCache(root=tmp_path)
     [m] = cache.scan()
     assert m.size_bytes == 4096
-    assert m.path == tmp_path / "x.task"
+    assert m.path == tmp_path / "x.litertlm"
 
 
 def test_delete_removes_file(tmp_path: Path):
-    f = tmp_path / "y.task"
+    f = tmp_path / "y.litertlm"
     f.write_bytes(b"data")
     cache = FilesystemCache(root=tmp_path)
     cache.delete("y")
@@ -2471,7 +2471,7 @@ uv run pytest tests/model_registry/test_filesystem.py -v
 Create `litert-llm-server/app/src/litert_server/model_registry/filesystem.py`:
 
 ```python
-"""Local filesystem cache for `.task` model files."""
+"""Local filesystem cache for `.litertlm` model files."""
 
 from __future__ import annotations
 
@@ -2480,7 +2480,7 @@ from pathlib import Path
 
 from litert_server.domain.types import ModelInfo
 
-MODEL_EXT = ".task"
+MODEL_EXT = ".litertlm"
 
 
 @dataclass
@@ -2553,10 +2553,10 @@ from litert_server.model_registry.huggingface import (
 
 
 async def test_list_reflects_filesystem(tmp_path: Path):
-    (tmp_path / "gemma-2b-it.task").write_bytes(b"x" * 512)
+    (tmp_path / "gemma-4-e2b.litertlm").write_bytes(b"x" * 512)
     reg = HuggingFaceRegistry(cache=FilesystemCache(root=tmp_path))
     models = await reg.list()
-    assert {m.name for m in models} == {"gemma-2b-it"}
+    assert {m.name for m in models} == {"gemma-4-e2b"}
 
 
 async def test_get_unknown_raises(tmp_path: Path):
@@ -2580,7 +2580,7 @@ async def test_pull_known_emits_progress(tmp_path: Path):
     ):
         progress = [p async for p in reg.pull(target)]
     assert progress[-1].status == "done"
-    assert (tmp_path / f"{target}.task").exists()
+    assert (tmp_path / f"{target}.litertlm").exists()
 
 
 async def test_pull_unknown_emits_error(tmp_path: Path):
@@ -2629,22 +2629,30 @@ class CatalogEntry:
 
 
 MODEL_CATALOG: dict[str, CatalogEntry] = {
-    "gemma-2b-it": CatalogEntry(
-        name="gemma-2b-it",
-        repo_id="google/gemma-2-2b-it-tflite",
-        filename="gemma-2-2b-it-q8.task",
-        quantization="int8",
+    # Public — no HF token required
+    "gemma-4-e2b": CatalogEntry(
+        name="gemma-4-e2b",
+        repo_id="litert-community/gemma-4-E2B-it-litert-lm",
+        filename="gemma-4-E2B-it.litertlm",
+        quantization="int4",
     ),
-    "gemma-3-1b-it": CatalogEntry(
-        name="gemma-3-1b-it",
-        repo_id="google/gemma-3-1b-it-tflite",
-        filename="gemma-3-1b-it-q8.task",
-        quantization="int8",
+    "gemma-4-e4b": CatalogEntry(
+        name="gemma-4-e4b",
+        repo_id="litert-community/gemma-4-E4B-it-litert-lm",
+        filename="gemma-4-E4B-it.litertlm",
+        quantization="int4",
     ),
-    "gemma-3-4b-it": CatalogEntry(
-        name="gemma-3-4b-it",
-        repo_id="google/gemma-3-4b-it-tflite",
-        filename="gemma-3-4b-it-q4.task",
+    # Gated — require HF token + accepted Gemma license
+    "gemma-3n-e2b": CatalogEntry(
+        name="gemma-3n-e2b",
+        repo_id="google/gemma-3n-E2B-it-litert-lm",
+        filename="gemma-3n-E2B-it-int4.litertlm",
+        quantization="int4",
+    ),
+    "gemma-3n-e4b": CatalogEntry(
+        name="gemma-3n-e4b",
+        repo_id="google/gemma-3n-E4B-it-litert-lm",
+        filename="gemma-3n-E4B-it-int4.litertlm",
         quantization="int4",
     ),
 }
@@ -2701,12 +2709,14 @@ class HuggingFaceRegistry:
         self.cache.delete(name)
 ```
 
-> **Note on auth**: Google's Gemma `.task` repositories on HuggingFace are
-> **gated** — anonymous downloads return 401. The token is forwarded
-> explicitly via the `token=` kwarg; passing `None` lets `huggingface_hub`
-> fall back to the `HF_TOKEN` environment variable (set by bashio from
-> the `hf_token` add-on option). Users must first accept the Gemma
-> license on the HuggingFace model page and create a read-scope token.
+> **Note on auth**: The `litert-community/*` Gemma 4 repositories are
+> public — no token needed. The `google/*-litert-lm` Gemma 3n
+> repositories are **gated** — anonymous downloads return 401. The token
+> is forwarded explicitly via the `token=` kwarg; passing `None` lets
+> `huggingface_hub` fall back to the `HF_TOKEN` environment variable
+> (set by bashio from the `hf_token` add-on option). For gated models,
+> users must first accept the Gemma license on the HuggingFace model
+> page and create a read-scope token.
 
 - [ ] **Step 4: Run tests**
 
@@ -2746,21 +2756,21 @@ from litert_server.config import Settings
 
 def test_settings_reads_env(monkeypatch):
     monkeypatch.setenv("LITERT_LOG_LEVEL", "debug")
-    monkeypatch.setenv("LITERT_DEFAULT_MODEL", "gemma-2b-it")
+    monkeypatch.setenv("LITERT_DEFAULT_MODEL", "gemma-4-e2b")
     monkeypatch.setenv("LITERT_MAX_TOKENS", "256")
     monkeypatch.setenv("LITERT_TEMPERATURE", "0.5")
     monkeypatch.setenv("LITERT_MODELS_DIR", "/data/models")
     monkeypatch.setenv("LITERT_PORT", "8080")
-    monkeypatch.setenv("LITERT_PRELOAD_MODELS", json.dumps(["gemma-2b-it"]))
+    monkeypatch.setenv("LITERT_PRELOAD_MODELS", json.dumps(["gemma-4-e2b"]))
     monkeypatch.setenv("HF_TOKEN", "hf_xxx")
     s = Settings()
     assert s.log_level == "debug"
-    assert s.default_model == "gemma-2b-it"
+    assert s.default_model == "gemma-4-e2b"
     assert s.max_tokens == 256
     assert s.temperature == 0.5
     assert str(s.models_dir) == "/data/models"
     assert s.port == 8080
-    assert s.preload_models == ["gemma-2b-it"]
+    assert s.preload_models == ["gemma-4-e2b"]
     assert s.hf_token == "hf_xxx"
 
 
@@ -2815,7 +2825,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="LITERT_", extra="ignore")
 
     log_level: LogLevel = "info"
-    default_model: str = "gemma-2b-it"
+    default_model: str = "gemma-4-e2b"
     max_tokens: int = 1024
     temperature: float = 0.7
     models_dir: Path = Path("/data/models")
@@ -3106,7 +3116,7 @@ map:
   - share:rw
 options:
   log_level: info
-  default_model: "gemma-2b-it"
+  default_model: "gemma-4-e2b"
   max_tokens: 1024
   temperature: 0.7
   preload_models: []
@@ -3114,7 +3124,7 @@ options:
 schema:
   log_level: list(trace|debug|info|notice|warning|error|fatal)
   default_model: str
-  max_tokens: int(1,8192)
+  max_tokens: int(1,32768)
   temperature: float(0.0,2.0)
   preload_models:
     - str
@@ -3225,7 +3235,7 @@ LITERT_PRELOAD_MODELS="$(bashio::config 'preload_models')"
 export LITERT_PRELOAD_MODELS
 
 # HuggingFace token: exported as HF_TOKEN (the env var huggingface_hub reads
-# by default). Required for downloading gated Gemma .task repos.
+# by default). Required for downloading gated google/*-litert-lm repos.
 HF_TOKEN_VALUE="$(bashio::config 'hf_token')"
 if [ -n "${HF_TOKEN_VALUE}" ]; then
     export HF_TOKEN="${HF_TOKEN_VALUE}"
@@ -3321,30 +3331,34 @@ integration and any Ollama-compatible client (Node-RED nodes, Open WebUI, …).
 
 ## Supported Models (MVP)
 
-| Name | Quantization | Approx. Size |
-|---|---|---|
-| `gemma-2b-it` | int8 | ~1.5 GB |
-| `gemma-3-1b-it` | int8 | ~800 MB |
-| `gemma-3-4b-it` | int4 | ~2.3 GB |
+All models use the LiteRT-LM `.litertlm` format. Context window: up to 32k
+tokens (prompt + completion combined).
+
+| Name | Repository | Gated | Approx. Size |
+|---|---|---|---|
+| `gemma-4-e2b` (default) | `litert-community/gemma-4-E2B-it-litert-lm` | no | ~1.5 GB |
+| `gemma-4-e4b` | `litert-community/gemma-4-E4B-it-litert-lm` | no | ~2.8 GB |
+| `gemma-3n-e2b` | `google/gemma-3n-E2B-it-litert-lm` | yes (HF token) | ~1.5 GB |
+| `gemma-3n-e4b` | `google/gemma-3n-E4B-it-litert-lm` | yes (HF token) | ~2.8 GB |
 
 Models are downloaded on demand via the Ollama-compatible `/api/pull`
 endpoint. See `DOCS.md` for usage.
 
-## Prerequisites — HuggingFace Access for Gemma
+## Prerequisites — HuggingFace Access (only for gated Gemma 3n models)
 
-Google's Gemma `.task` repositories on HuggingFace are **gated**. Before
-the add-on can download any Gemma model:
+The `litert-community/*` Gemma 4 models are public — no token needed.
+The `google/*` Gemma 3n models are **gated**. To use them:
 
 1. Sign in at <https://huggingface.co/>.
 2. Open the model page (e.g.
-   <https://huggingface.co/google/gemma-2-2b-it-tflite>) and accept the
-   Gemma license.
+   <https://huggingface.co/google/gemma-3n-E2B-it-litert-lm>) and accept
+   the Gemma license.
 3. Create a **read-scope access token** at
    <https://huggingface.co/settings/tokens>.
 4. Paste the token into the `hf_token` add-on option (it is stored as a
    password-type field and never appears in logs).
 
-Without a valid token, `/api/pull` requests for Gemma models will fail
+Without a valid token, `/api/pull` requests for gated models will fail
 with HTTP 401.
 
 ## Configuration
@@ -3352,11 +3366,11 @@ with HTTP 401.
 | Option | Default | Description |
 |---|---|---|
 | `log_level` | `info` | trace, debug, info, notice, warning, error, fatal |
-| `default_model` | `gemma-2b-it` | Model used when a request omits `model` |
-| `max_tokens` | 1024 | Hard upper bound for any request |
+| `default_model` | `gemma-4-e2b` | Model used when a request omits `model` |
+| `max_tokens` | 1024 | Default upper bound for any request; can be raised up to 32768 (the LiteRT-LM context window) |
 | `temperature` | 0.7 | Default sampling temperature |
 | `preload_models` | `[]` | Model names to pull on startup |
-| `hf_token` | `""` | HuggingFace read token; required for Gemma downloads. |
+| `hf_token` | `""` | HuggingFace read token; required only for gated `google/*` Gemma 3n models. |
 ```
 
 - [ ] **Step 2: Create `litert-llm-server/DOCS.md`**
@@ -3392,7 +3406,7 @@ Add an "OpenAI Conversation" integration:
 
 - **Base URL:** `http://<add-on-hostname>:8080/v1`
 - **API key:** anything (no auth in MVP)
-- **Model:** `gemma-2b-it`
+- **Model:** `gemma-4-e2b`
 
 ## Using with Node-RED
 
@@ -3400,6 +3414,8 @@ Use any Ollama node and point it to `http://<add-on-hostname>:8080`.
 
 ## Limits (MVP)
 
+- **Context window: 32k tokens** (prompt + completion combined). Long
+  multi-turn conversations may exhaust it; no automatic truncation in MVP.
 - Single-slot engine: switching models mid-flight triggers a reload.
 - No request queue: concurrent requests serialize.
 - No authentication: rely on HA's internal network.
@@ -3415,8 +3431,9 @@ Use any Ollama node and point it to `http://<add-on-hostname>:8080`.
 
 - Initial release.
 - OpenAI- and Ollama-compatible APIs.
-- Gemma 2B / 3-1B / 3-4B supported via HuggingFace catalog.
+- Gemma 4 E2B/E4B (public) and Gemma 3n E2B/E4B (gated) via HuggingFace.
 - Auto-download via `/api/pull`.
+- 32k context window.
 ```
 
 - [ ] **Step 4: Commit**
@@ -3454,7 +3471,7 @@ Expected: image builds without errors. Build will take several minutes on first 
 mkdir -p /tmp/litert-models
 docker run --rm -p 8080:8080 \
   -e LITERT_LOG_LEVEL=debug \
-  -e LITERT_DEFAULT_MODEL=gemma-2b-it \
+  -e LITERT_DEFAULT_MODEL=gemma-4-e2b \
   -e LITERT_MAX_TOKENS=128 \
   -e LITERT_TEMPERATURE=0.7 \
   -e LITERT_MODELS_DIR=/data/models \
@@ -3479,11 +3496,11 @@ Expected: health is `{"status":"ok"}`. Models lists are empty (no models cached 
 ```bash
 curl -sS -X POST http://localhost:8080/api/pull \
   -H 'content-type: application/json' \
-  -d '{"name":"gemma-2b-it","stream":false}'
+  -d '{"name":"gemma-4-e2b","stream":false}'
 
 curl -sS http://localhost:8080/v1/models
 ```
-Expected: pull completes (may take a while), `/v1/models` then lists `gemma-2b-it`.
+Expected: pull completes (may take a while), `/v1/models` then lists `gemma-4-e2b`.
 
 - [ ] **Step 5: Chat completion smoke test**
 
@@ -3491,7 +3508,7 @@ Expected: pull completes (may take a while), `/v1/models` then lists `gemma-2b-i
 curl -sS -X POST http://localhost:8080/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{
-    "model":"gemma-2b-it",
+    "model":"gemma-4-e2b",
     "messages":[{"role":"user","content":"Say hi in one sentence."}],
     "max_tokens":40,
     "stream":false
@@ -3523,7 +3540,7 @@ Expected: installation succeeds.
 
 - [ ] **Step 3: Configure and start**
 
-Set `default_model: gemma-2b-it` and click "Start".
+Set `default_model: gemma-4-e2b` and click "Start".
 
 Expected: add-on logs show `uvicorn running on 0.0.0.0:8080`. `/healthz` reachable via the add-on's internal hostname.
 
@@ -3533,7 +3550,7 @@ Settings → Devices & Services → Add Integration → "OpenAI Conversation".
 
 - **Base URL:** `http://<addon-hostname>:8080/v1` (the hostname HA assigns to the add-on)
 - **API key:** anything, e.g., `local`
-- **Model:** `gemma-2b-it`
+- **Model:** `gemma-4-e2b`
 
 Trigger a test conversation. Expected: HA receives a generated reply.
 

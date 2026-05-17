@@ -72,7 +72,7 @@ All commands assume you are in `<addon-name>/app/`. The Python app uses `uv`.
 uv sync
 
 # Run the server locally (no HA, no Docker) — reads ENV vars
-LITERT_DEFAULT_MODEL=gemma-2b-it \
+LITERT_DEFAULT_MODEL=gemma-4-e2b \
 LITERT_MODELS_DIR=./.models \
 LITERT_PORT=8080 \
   uv run uvicorn litert_server.__main__:app --reload
@@ -99,7 +99,7 @@ docker build \
 
 # Run standalone for smoke tests (no HA supervisor)
 docker run --rm -p 8080:8080 \
-  -e LITERT_DEFAULT_MODEL=gemma-2b-it \
+  -e LITERT_DEFAULT_MODEL=gemma-4-e2b \
   -e HF_TOKEN=hf_xxx \
   -v $(pwd)/.models:/data/models \
   local/litert-llm-server:dev
