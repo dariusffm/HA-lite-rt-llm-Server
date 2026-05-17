@@ -6,13 +6,18 @@ Imports only `domain.*`. Translates between HTTP/JSON/NDJSON and the
 
 from __future__ import annotations
 
+import json
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from typing import Any, Literal
 
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from litert_server.domain.inference import InferenceService
 from litert_server.domain.model_registry import ModelRegistry
+from litert_server.domain.types import GenerationParams
 
 
 class OllamaModelDetails(BaseModel):
@@ -32,6 +37,36 @@ class OllamaModelItem(BaseModel):
 
 class OllamaTagsResponse(BaseModel):
     models: list[OllamaModelItem]
+
+
+class OllamaChatMessage(BaseModel):
+    role: Literal["system", "user", "assistant"]
+    content: str
+
+
+class OllamaChatRequest(BaseModel):
+    model: str
+    messages: list[OllamaChatMessage]
+    stream: bool = True
+    options: dict[str, Any] | None = None
+
+
+def _params_from_ollama_options(options: dict[str, Any] | None) -> GenerationParams:
+    options = options or {}
+    return GenerationParams(
+        max_tokens=int(options.get("num_predict", 512)),
+        temperature=float(options.get("temperature", 0.7)),
+        top_p=options.get("top_p"),
+        stop=options.get("stop"),
+    )
+
+
+def _render_chat_prompt(messages: list[OllamaChatMessage]) -> str:
+    parts: list[str] = []
+    for msg in messages:
+        parts.append(f"<|{msg.role}|>\n{msg.content}")
+    parts.append("<|assistant|>\n")
+    return "\n".join(parts)
 
 
 def build_ollama_router(
@@ -56,5 +91,53 @@ def build_ollama_router(
                 for m in models
             ]
         )
+
+    @router.post("/chat", response_model=None)
+    async def chat(
+        req: OllamaChatRequest,
+    ) -> StreamingResponse | dict[str, Any]:
+        params = _params_from_ollama_options(req.options)
+        prompt = _render_chat_prompt(req.messages)
+        created_at = datetime.now(UTC).isoformat()
+
+        async def emit() -> AsyncIterator[str]:
+            finish: str | None = None
+            async for tok in engine.stream_completion(req.model, prompt, params):
+                if tok.finish_reason is not None:
+                    finish = tok.finish_reason
+                yield json.dumps(
+                    {
+                        "model": req.model,
+                        "created_at": created_at,
+                        "message": {"role": "assistant", "content": tok.text},
+                        "done": False,
+                    }
+                ) + "\n"
+            yield json.dumps(
+                {
+                    "model": req.model,
+                    "created_at": created_at,
+                    "message": {"role": "assistant", "content": ""},
+                    "done": True,
+                    "done_reason": finish or "stop",
+                }
+            ) + "\n"
+
+        if req.stream:
+            return StreamingResponse(emit(), media_type="application/x-ndjson")
+
+        text_parts: list[str] = []
+        finish: str | None = None
+        async for tok in engine.stream_completion(req.model, prompt, params):
+            text_parts.append(tok.text)
+            if tok.finish_reason is not None:
+                finish = tok.finish_reason
+        return {
+            "model": req.model,
+            "created_at": created_at,
+            "message": {"role": "assistant", "content": "".join(text_parts)},
+            "done": True,
+            "done_reason": finish or "stop",
+        }
 
     return router
