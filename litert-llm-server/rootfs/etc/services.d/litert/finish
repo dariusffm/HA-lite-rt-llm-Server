@@ -1,2 +1,2 @@
-#!/usr/bin/execlineb -S0
-s6-svscanctl -t /var/run/s6/services
+#!/command/execlineb -S1
+s6-svscanctl -t /run/service

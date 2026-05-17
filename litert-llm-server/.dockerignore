@@ -1,9 +1,17 @@
+.git
+.DS_Store
 app/.venv
 app/.pytest_cache
 app/.mypy_cache
 app/.ruff_cache
 app/.models
 app/.import_linter_cache
+app/.uv-cache
+app/.coverage
+app/htmlcov
+app/dist
+app/build
+app/*.egg-info
 app/tests
 app/scripts
 **/__pycache__

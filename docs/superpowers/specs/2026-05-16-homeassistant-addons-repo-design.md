@@ -201,8 +201,6 @@ ports:
   8080/tcp: 8080
 ports_description:
   8080/tcp: "HTTP API (OpenAI + Ollama)"
-map:
-  - share:rw
 options:
   log_level: info
   default_model: "gemma-4-e2b"
@@ -211,7 +209,7 @@ options:
   preload_models: []
   hf_token: ""
 schema:
-  log_level: list(trace|debug|info|notice|warning|error|fatal)
+  log_level: list(trace|debug|info|warning|error|critical)
   default_model: str
   max_tokens: int(1,32768)
   temperature: float(0.0,2.0)
@@ -219,6 +217,13 @@ schema:
     - str
   hf_token: password?
 ```
+
+> **Anmerkung zur `log_level`-Liste**: uvicorn akzeptiert
+> `critical|error|warning|info|debug|trace`. Die Schema-Enum spiegelt
+> exakt diese Werte; ein bashio-Wert wird ungemappt an `uvicorn
+> --log-level` durchgereicht. Die HA-typischen Werte `notice` und
+> `fatal` sind bewusst ausgeschlossen, weil uvicorn sie mit
+> "Invalid log level" abweisen würde.
 
 > **Anmerkung zu `hf_token`**: HA-Add-on-Schema-Typ `password?` ist
 > optional und wird in der HA-UI maskiert dargestellt. Der Wert wird via
@@ -269,6 +274,8 @@ labels:
 
 ```bash
 #!/usr/bin/with-contenv bashio
+set -euo pipefail
+
 bashio::log.info "Reading add-on configuration..."
 
 export LITERT_LOG_LEVEL="$(bashio::config 'log_level')"
@@ -281,14 +288,17 @@ export LITERT_PORT="8080"
 LITERT_PRELOAD_MODELS="$(bashio::config 'preload_models')"
 export LITERT_PRELOAD_MODELS
 
-# HuggingFace token: exported as HF_TOKEN (the env var huggingface_hub reads
-# by default). Required for downloading gated google/*-litert-lm repos.
-HF_TOKEN_VALUE="$(bashio::config 'hf_token')"
-if [ -n "${HF_TOKEN_VALUE}" ]; then
-    export HF_TOKEN="${HF_TOKEN_VALUE}"
+# HuggingFace token: exported as HF_TOKEN only when the operator set a
+# non-empty value (the env var huggingface_hub reads by default).
+if bashio::config.has_value 'hf_token'; then
+    export HF_TOKEN="$(bashio::config 'hf_token')"
 fi
 
-printenv | grep -E '^(LITERT_|HF_TOKEN$)' > /var/run/s6/container_environment/litert.env
+# Persist for s6-overlay v3 (base-python:14.0.2 ships v3).
+mkdir -p /run/s6/container_environment
+printenv | grep -E '^(LITERT_|HF_TOKEN$)' | while IFS='=' read -r key value; do
+    printf '%s' "${value}" > "/run/s6/container_environment/${key}"
+done
 ```
 
 ### `rootfs/etc/services.d/litert/run`
@@ -305,8 +315,8 @@ exec uvicorn --factory litert_server.__main__:make_production_app \
 ### `rootfs/etc/services.d/litert/finish`
 
 ```bash
-#!/usr/bin/execlineb -S0
-s6-svscanctl -t /var/run/s6/services
+#!/command/execlineb -S1
+s6-svscanctl -t /run/service
 ```
 
 ## 6. Applikations-Architektur

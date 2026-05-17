@@ -12,8 +12,6 @@ ports:
   8080/tcp: 8080
 ports_description:
   8080/tcp: "HTTP API (OpenAI + Ollama)"
-map:
-  - share:rw
 options:
   log_level: info
   default_model: "gemma-4-e2b"
@@ -22,7 +20,7 @@ options:
   preload_models: []
   hf_token: ""
 schema:
-  log_level: list(trace|debug|info|notice|warning|error|fatal)
+  log_level: list(trace|debug|info|warning|error|critical)
   default_model: str
   max_tokens: int(1,32768)
   temperature: float(0.0,2.0)
