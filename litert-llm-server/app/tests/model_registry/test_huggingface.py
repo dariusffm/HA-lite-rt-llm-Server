@@ -67,3 +67,21 @@ async def test_pull_unknown_emits_error(tmp_path: Path):
     reg = HuggingFaceRegistry(cache=FilesystemCache(root=tmp_path))
     progress = [p async for p in reg.pull("nope")]
     assert progress[-1].status == "error"
+
+
+def test_empty_token_normalized_to_none(tmp_path: Path):
+    reg = HuggingFaceRegistry(cache=FilesystemCache(root=tmp_path), hf_token="")
+    assert reg.hf_token is None
+    reg2 = HuggingFaceRegistry(cache=FilesystemCache(root=tmp_path), hf_token="   ")
+    assert reg2.hf_token is None
+    reg3 = HuggingFaceRegistry(cache=FilesystemCache(root=tmp_path), hf_token="hf_x")
+    assert reg3.hf_token == "hf_x"
+
+
+async def test_list_enriches_quantization_from_catalog(tmp_path: Path):
+    (tmp_path / "gemma-4-e2b.litertlm").write_bytes(b"x" * 16)
+    (tmp_path / "unknown-model.litertlm").write_bytes(b"x" * 16)
+    reg = HuggingFaceRegistry(cache=FilesystemCache(root=tmp_path))
+    models = {m.name: m for m in await reg.list()}
+    assert models["gemma-4-e2b"].quantization == "int4"
+    assert models["unknown-model"].quantization == "unknown"

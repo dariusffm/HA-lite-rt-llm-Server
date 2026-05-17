@@ -18,6 +18,9 @@ class FilesystemCache:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def scan(self) -> list[ModelInfo]:
+        """List cached models. Quantization is reported as ``"unknown"``;
+        callers (registries) enrich it via their catalog.
+        """
         out: list[ModelInfo] = []
         for p in sorted(self.root.iterdir()):
             if p.is_file() and p.suffix == MODEL_EXT:
@@ -25,7 +28,7 @@ class FilesystemCache:
                     ModelInfo(
                         name=p.stem,
                         size_bytes=p.stat().st_size,
-                        quantization="int4",
+                        quantization="unknown",
                         path=p,
                     )
                 )

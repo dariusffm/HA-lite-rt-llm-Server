@@ -8,10 +8,12 @@ gated (`google/*-litert-lm`, needs ``hf_token``).
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from huggingface_hub import hf_hub_download
 
@@ -24,7 +26,7 @@ class CatalogEntry:
     name: str
     repo_id: str
     filename: str
-    quantization: str
+    quantization: Literal["int4"]
     gated: bool
 
 
@@ -62,19 +64,47 @@ MODEL_CATALOG: dict[str, CatalogEntry] = {
 }
 
 
+def _link_or_copy(src: str, dst: Path) -> None:
+    """Materialize ``dst`` from ``src``. Tries a hardlink first (zero-copy
+    on the same filesystem) and falls back to a full copy across mounts.
+    """
+    try:
+        os.link(src, dst)
+    except OSError:
+        shutil.copyfile(src, dst)
+
+
 @dataclass
 class HuggingFaceRegistry:
     cache: FilesystemCache
     hf_token: str | None = None  # injected by __main__ from Settings.hf_token
 
+    def __post_init__(self) -> None:
+        # Empty string from bashio's `config.yaml` should behave like 'no token'.
+        if self.hf_token is not None and not self.hf_token.strip():
+            self.hf_token = None
+
+    def _enrich(self, info: ModelInfo) -> ModelInfo:
+        entry = MODEL_CATALOG.get(info.name)
+        if entry is None:
+            return info
+        return info.model_copy(update={"quantization": entry.quantization})
+
     async def list(self) -> list[ModelInfo]:
-        return self.cache.scan()
+        return [self._enrich(m) for m in self.cache.scan()]
 
     async def get(self, name: str) -> ModelInfo:
-        for m in self.cache.scan():
-            if m.name == name:
-                return m
-        raise KeyError(name)
+        path = self.cache.path_for(name)
+        if not path.is_file():
+            raise KeyError(name)
+        stat = path.stat()
+        entry = MODEL_CATALOG.get(name)
+        return ModelInfo(
+            name=name,
+            size_bytes=stat.st_size,
+            quantization=entry.quantization if entry else "unknown",
+            path=path,
+        )
 
     async def pull(self, name: str) -> AsyncIterator[PullProgress]:
         if name not in MODEL_CATALOG:
@@ -106,7 +136,9 @@ class HuggingFaceRegistry:
             return
 
         target = self.cache.path_for(name)
-        await asyncio.to_thread(shutil.copyfile, tmp_path, target)
+        # Replace any prior file (delete-or-noop, then link/copy).
+        await asyncio.to_thread(self.cache.delete, name)
+        await asyncio.to_thread(_link_or_copy, tmp_path, target)
 
         size = target.stat().st_size
         yield PullProgress(bytes_done=size, bytes_total=size, status="done")

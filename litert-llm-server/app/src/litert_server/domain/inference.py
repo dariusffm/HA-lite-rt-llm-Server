@@ -43,6 +43,16 @@ class InferenceService(Protocol):
         ...
 
 
+async def _drain(stream: AsyncIterator[Token]) -> tuple[str, Literal["stop", "length"]]:
+    parts: list[str] = []
+    finish: Literal["stop", "length"] | None = None
+    async for tok in stream:
+        parts.append(tok.text)
+        if tok.finish_reason is not None:
+            finish = tok.finish_reason
+    return "".join(parts), finish or "stop"
+
+
 async def collect_completion(
     engine: InferenceService,
     model: str,
@@ -50,13 +60,7 @@ async def collect_completion(
     params: GenerationParams,
 ) -> tuple[str, Literal["stop", "length"]]:
     """Drain ``stream_completion`` into a single (text, finish_reason) pair."""
-    parts: list[str] = []
-    finish: Literal["stop", "length"] | None = None
-    async for tok in engine.stream_completion(model, prompt, params):
-        parts.append(tok.text)
-        if tok.finish_reason is not None:
-            finish = tok.finish_reason
-    return "".join(parts), finish or "stop"
+    return await _drain(engine.stream_completion(model, prompt, params))
 
 
 async def collect_chat(
@@ -66,10 +70,4 @@ async def collect_chat(
     params: GenerationParams,
 ) -> tuple[str, Literal["stop", "length"]]:
     """Drain ``stream_chat`` into a single (text, finish_reason) pair."""
-    parts: list[str] = []
-    finish: Literal["stop", "length"] | None = None
-    async for tok in engine.stream_chat(model, messages, params):
-        parts.append(tok.text)
-        if tok.finish_reason is not None:
-            finish = tok.finish_reason
-    return "".join(parts), finish or "stop"
+    return await _drain(engine.stream_chat(model, messages, params))
