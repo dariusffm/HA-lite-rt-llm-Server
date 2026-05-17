@@ -1,0 +1,35 @@
+[importlinter]
+root_package = litert_server
+include_external_packages = True
+
+[importlinter:contract:domain-purity]
+name = Domain has no internal dependencies
+type = forbidden
+source_modules =
+    litert_server.domain
+forbidden_modules =
+    litert_server.engines
+    litert_server.adapters
+    litert_server.model_registry
+
+[importlinter:contract:adapters-do-not-know-engines]
+name = Adapters never import engines or registry concretions
+type = forbidden
+source_modules =
+    litert_server.adapters
+forbidden_modules =
+    litert_server.engines
+    litert_server.model_registry
+    litert_lm
+    huggingface_hub
+
+[importlinter:contract:domain-has-no-third-party]
+name = Domain only imports pydantic + stdlib
+type = forbidden
+source_modules =
+    litert_server.domain
+forbidden_modules =
+    litert_lm
+    huggingface_hub
+    fastapi
+    uvicorn
