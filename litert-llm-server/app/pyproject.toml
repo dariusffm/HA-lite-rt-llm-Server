@@ -46,3 +46,7 @@ select = ["E", "F", "I", "B", "UP", "ASYNC", "RUF"]
 python_version = "3.12"
 strict = true
 files = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["litert_lm", "litert_lm.*", "huggingface_hub", "huggingface_hub.*"]
+ignore_missing_imports = true
