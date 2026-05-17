@@ -93,7 +93,7 @@ Building the add-on container locally (slow on first run):
 ```bash
 # From <addon-name>/  (set BUILD_ARCH to the host's HA arch: amd64 or aarch64)
 docker build \
-  --build-arg BUILD_FROM=ghcr.io/hassio-addons/base-python:14.0.2 \
+  --build-arg BUILD_FROM=ghcr.io/hassio-addons/debian-base:9.3.0 \
   --build-arg BUILD_ARCH=amd64 \
   -t local/litert-llm-server:dev .
 

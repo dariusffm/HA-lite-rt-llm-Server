@@ -6,7 +6,7 @@
 
 **Architecture:** Ports & Adapters (Hexagonal). Two HTTP protocol adapters (OpenAI, Ollama) talk to a single `InferenceService` Protocol implemented by `LiteRTEngine`. A `ModelRegistry` Protocol handles model downloads via HuggingFace. The HA add-on wrapper (s6-overlay + bashio) is a thin shell around the Python app; bashio is the only translator from `config.yaml` to environment variables.
 
-**Tech Stack:** Python 3.12, FastAPI, uvicorn, pydantic v2, pydantic-settings, litert-lm-api, huggingface_hub, pytest + pytest-asyncio, httpx, ruff, mypy, import-linter, uv. Container base: `ghcr.io/hassio-addons/base-python:14.0.2`.
+**Tech Stack:** Python 3.12, FastAPI, uvicorn, pydantic v2, pydantic-settings, litert-lm-api, huggingface_hub, pytest + pytest-asyncio, httpx, ruff, mypy, import-linter, uv. Container base: `ghcr.io/hassio-addons/debian-base:9.3.0`.
 
 **Reference spec:** `docs/superpowers/specs/2026-05-16-homeassistant-addons-repo-design.md`
 
@@ -176,7 +176,7 @@ If not installed: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 name = "litert-server"
 version = "0.1.0"
 description = "Local LLM inference server using Google LiteRT"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
@@ -3138,8 +3138,8 @@ schema:
 
 ```yaml
 build_from:
-  amd64: ghcr.io/hassio-addons/base-python:14.0.2
-  aarch64: ghcr.io/hassio-addons/base-python:14.0.2
+  amd64: ghcr.io/hassio-addons/debian-base:9.3.0
+  aarch64: ghcr.io/hassio-addons/debian-base:9.3.0
 labels:
   org.opencontainers.image.source: "https://github.com/USER/homassist-addons"
 ```
@@ -3466,7 +3466,7 @@ Run from the repo root:
 ```bash
 # Pick BUILD_ARCH to match your host (amd64 on x86, aarch64 on ARM64).
 docker build \
-  --build-arg BUILD_FROM=ghcr.io/hassio-addons/base-python:14.0.2 \
+  --build-arg BUILD_FROM=ghcr.io/hassio-addons/debian-base:9.3.0 \
   --build-arg BUILD_ARCH=amd64 \
   -t local/litert-llm-server:dev \
   litert-llm-server

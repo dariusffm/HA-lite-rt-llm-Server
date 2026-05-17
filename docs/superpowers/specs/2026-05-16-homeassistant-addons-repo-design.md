@@ -139,7 +139,7 @@ homassist-addons/
 │
 ├── litert-llm-server/          # Erstes Add-on
 │   ├── config.yaml             # HA-Add-on-Schema (Ports, Options, Schema)
-│   ├── Dockerfile              # FROM ghcr.io/hassio-addons/base-python:14.0.2
+│   ├── Dockerfile              # FROM ghcr.io/hassio-addons/debian-base:9.3.0
 │   ├── build.yaml              # Build-Args, OCI-Labels
 │   ├── README.md               # Nutzer-Doku (Install, Optionen)
 │   ├── DOCS.md                 # Detail-Doku (API, Modelle, Limits)
@@ -262,8 +262,8 @@ LABEL io.hass.version="0.1.0" \
 
 ```yaml
 build_from:
-  amd64: ghcr.io/hassio-addons/base-python:14.0.2
-  aarch64: ghcr.io/hassio-addons/base-python:14.0.2
+  amd64: ghcr.io/hassio-addons/debian-base:9.3.0
+  aarch64: ghcr.io/hassio-addons/debian-base:9.3.0
 labels:
   org.opencontainers.image.source: "https://github.com/USER/homassist-addons"
 ```
@@ -547,7 +547,7 @@ Building the add-on container locally (slow on first run):
 ```bash
 # From <addon-name>/  (set BUILD_ARCH to the host's HA arch: amd64 or aarch64)
 docker build \
-  --build-arg BUILD_FROM=ghcr.io/hassio-addons/base-python:14.0.2 \
+  --build-arg BUILD_FROM=ghcr.io/hassio-addons/debian-base:9.3.0 \
   --build-arg BUILD_ARCH=amd64 \
   -t local/litert-llm-server:dev .
 

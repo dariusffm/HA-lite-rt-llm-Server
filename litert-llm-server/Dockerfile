@@ -5,23 +5,28 @@ ARG BUILD_ARCH
 
 ENV LANG=C.UTF-8 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    DEBIAN_FRONTEND=noninteractive
 
-# litert-lm-api's bundled C library needs libstdc++ + OpenMP.
-# If litert-lm-api ships only manylinux (glibc) wheels and the base
-# image is musl-based (Alpine), add `gcompat` here so the wheel loads.
-RUN apk add --no-cache libstdc++ libgomp
+# litert-lm-api ships only manylinux wheels (glibc) — Alpine/musl fails,
+# Debian works. libgomp1 is the OpenMP runtime its bundled C library needs.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3 \
+        python3-dev \
+        python3-venv \
+        python3-pip \
+        libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --no-cache-dir --break-system-packages uv
 
-# --- deps layer (only invalidated when pyproject.toml / uv.lock changes) ---
-COPY app/pyproject.toml app/uv.lock app/README.md /opt/app/
+# Single COPY+install — earlier attempt to split deps/source layers
+# fell over because the install layer wheels only an empty __init__.py
+# stub; subsequent COPY app/src/ leaves site-packages out of sync. Two
+# minutes of rebuild is a smaller cost than a stale-package class of bug.
+COPY app/ /opt/app/
 WORKDIR /opt/app
-RUN pip install --no-cache-dir uv \
-    && mkdir -p src/litert_server \
-    && touch src/litert_server/__init__.py \
-    && uv pip install --system --no-cache .
-
-# --- source layer (invalidated on every code edit, but deps are cached) ---
-COPY app/src/ /opt/app/src/
+RUN uv pip install --system --no-cache --break-system-packages .
 
 COPY rootfs/ /
 
