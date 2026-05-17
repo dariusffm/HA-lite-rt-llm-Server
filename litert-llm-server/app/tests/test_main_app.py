@@ -22,10 +22,41 @@ async def test_healthz(client: AsyncClient):
     assert r.json() == {"status": "ok"}
 
 
-async def test_readyz_ok_when_engine_set(client: AsyncClient):
+async def test_readyz_ready_when_registry_has_models(client: AsyncClient):
     r = await client.get("/readyz")
     assert r.status_code == 200
-    assert r.json()["status"] == "ready"
+    body = r.json()
+    assert body["ready"] is True
+    assert body["status"] == "ready"
+
+
+async def test_readyz_no_models_when_registry_empty():
+    from collections.abc import AsyncIterator as _AI
+
+    from litert_server.__main__ import build_app
+    from litert_server.domain.types import ModelInfo, PullProgress
+
+    class _EmptyRegistry:
+        async def list(self) -> list[ModelInfo]:
+            return []
+
+        async def get(self, name: str) -> ModelInfo:
+            raise KeyError(name)
+
+        async def pull(self, name: str) -> _AI[PullProgress]:
+            yield PullProgress(bytes_done=0, bytes_total=0, status="done")
+
+        async def delete(self, name: str) -> None:
+            return None
+
+    app = build_app(engine=FakeEngine(), registry=_EmptyRegistry())
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get("/readyz")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ready"] is False
+    assert body["status"] == "no-models"
 
 
 async def test_both_router_sets_mounted(client: AsyncClient):

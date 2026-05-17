@@ -76,13 +76,15 @@ def _link_or_copy(src: str, dst: Path) -> None:
 
 @dataclass
 class HuggingFaceRegistry:
+    """HuggingFace-backed `ModelRegistry`.
+
+    The ``hf_token`` field accepts ``None`` (no auth) or a non-empty
+    token string. Settings normalizes blank/whitespace input to ``None``
+    at the OS-env boundary, so we don't re-validate here.
+    """
+
     cache: FilesystemCache
     hf_token: str | None = None  # injected by __main__ from Settings.hf_token
-
-    def __post_init__(self) -> None:
-        # Empty string from bashio's `config.yaml` should behave like 'no token'.
-        if self.hf_token is not None and not self.hf_token.strip():
-            self.hf_token = None
 
     def _enrich(self, info: ModelInfo) -> ModelInfo:
         entry = MODEL_CATALOG.get(info.name)
