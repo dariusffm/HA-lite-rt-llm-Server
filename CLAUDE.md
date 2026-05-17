@@ -75,7 +75,7 @@ uv sync
 LITERT_DEFAULT_MODEL=gemma-4-e2b \
 LITERT_MODELS_DIR=./.models \
 LITERT_PORT=8080 \
-  uv run uvicorn litert_server.__main__:app --reload
+  uv run uvicorn --factory litert_server.__main__:make_production_app --reload
 
 # Tests
 uv run pytest                       # all tests

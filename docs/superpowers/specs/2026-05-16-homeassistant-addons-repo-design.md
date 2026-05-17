@@ -296,7 +296,7 @@ printenv | grep -E '^(LITERT_|HF_TOKEN$)' > /var/run/s6/container_environment/li
 ```bash
 #!/usr/bin/with-contenv bashio
 cd /opt/app
-exec uvicorn litert_server.__main__:app \
+exec uvicorn --factory litert_server.__main__:make_production_app \
     --host 0.0.0.0 \
     --port "${LITERT_PORT}" \
     --log-level "${LITERT_LOG_LEVEL}"
@@ -519,7 +519,7 @@ uv sync
 LITERT_DEFAULT_MODEL=gemma-4-e2b \
 LITERT_MODELS_DIR=./.models \
 LITERT_PORT=8080 \
-  uv run uvicorn litert_server.__main__:app --reload
+  uv run uvicorn --factory litert_server.__main__:make_production_app --reload
 
 # Tests
 uv run pytest                       # all tests

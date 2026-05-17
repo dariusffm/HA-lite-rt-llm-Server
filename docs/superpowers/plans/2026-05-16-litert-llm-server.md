@@ -3277,7 +3277,7 @@ git commit -m "feat(litert): add bashio init script (config.yaml -> ENV)"
 ```bash
 #!/usr/bin/with-contenv bashio
 cd /opt/app
-exec uvicorn litert_server.__main__:app \
+exec uvicorn --factory litert_server.__main__:make_production_app \
     --host 0.0.0.0 \
     --port "${LITERT_PORT}" \
     --log-level "${LITERT_LOG_LEVEL}"
