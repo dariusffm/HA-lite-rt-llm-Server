@@ -1,7 +1,8 @@
 """Fake `InferenceService` for adapter-layer testing.
 
 Streams a fixed sequence of tokens. Records the most recent call args so
-tests can assert what the adapter sent down.
+tests can assert what the adapter sent down. Tracks completion vs chat
+calls separately to keep test assertions focused.
 """
 
 from __future__ import annotations
@@ -9,7 +10,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
-from litert_server.domain.types import GenerationParams, Token
+from typing import Literal, cast
+
+from litert_server.domain.types import ChatTurn, GenerationParams, Token
 
 
 @dataclass
@@ -20,10 +23,37 @@ class FakeEngineCall:
 
 
 @dataclass
+class FakeChatCall:
+    model: str
+    messages: list[ChatTurn]
+    params: GenerationParams
+
+
+@dataclass
 class FakeEngine:
     tokens: list[str] = field(default_factory=lambda: ["Hello", ", ", "world", "!"])
     finish_reason: str = "stop"
-    calls: list[FakeEngineCall] = field(default_factory=list)
+    completion_calls: list[FakeEngineCall] = field(default_factory=list)
+    chat_calls: list[FakeChatCall] = field(default_factory=list)
+
+    # Backwards-compat alias used by older tests.
+    @property
+    def calls(self) -> list[FakeEngineCall]:
+        return self.completion_calls
+
+    def _yield_tokens(self) -> list[Token]:
+        finish = cast(Literal["stop", "length"], self.finish_reason)
+        out: list[Token] = []
+        for i, text in enumerate(self.tokens):
+            is_last = i == len(self.tokens) - 1
+            out.append(
+                Token(
+                    text=text,
+                    index=i,
+                    finish_reason=finish if is_last else None,
+                )
+            )
+        return out
 
     async def stream_completion(
         self,
@@ -31,11 +61,20 @@ class FakeEngine:
         prompt: str,
         params: GenerationParams,
     ) -> AsyncIterator[Token]:
-        self.calls.append(FakeEngineCall(model=model, prompt=prompt, params=params))
-        for i, text in enumerate(self.tokens):
-            is_last = i == len(self.tokens) - 1
-            yield Token(
-                text=text,
-                index=i,
-                finish_reason=self.finish_reason if is_last else None,  # type: ignore[arg-type]
-            )
+        self.completion_calls.append(
+            FakeEngineCall(model=model, prompt=prompt, params=params)
+        )
+        for tok in self._yield_tokens():
+            yield tok
+
+    async def stream_chat(
+        self,
+        model: str,
+        messages: list[ChatTurn],
+        params: GenerationParams,
+    ) -> AsyncIterator[Token]:
+        self.chat_calls.append(
+            FakeChatCall(model=model, messages=list(messages), params=params)
+        )
+        for tok in self._yield_tokens():
+            yield tok

@@ -15,10 +15,13 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from litert_server.domain.inference import InferenceService, collect_completion
+from litert_server.domain.inference import (
+    InferenceService,
+    collect_chat,
+    collect_completion,
+)
 from litert_server.domain.model_registry import ModelRegistry
-from litert_server.domain.prompting import ChatTurn, render_chat_prompt
-from litert_server.domain.types import GenerationParams
+from litert_server.domain.types import ChatTurn, GenerationParams
 
 
 class OllamaModelDetails(BaseModel):
@@ -82,8 +85,8 @@ def _params_from_ollama_options(options: dict[str, Any] | None) -> GenerationPar
     )
 
 
-def _prompt_from_messages(messages: list[OllamaChatMessage]) -> str:
-    return render_chat_prompt(ChatTurn(role=m.role, content=m.content) for m in messages)
+def _to_chat_turns(messages: list[OllamaChatMessage]) -> list[ChatTurn]:
+    return [ChatTurn(role=m.role, content=m.content) for m in messages]
 
 
 def _nd(obj: dict[str, Any]) -> str:
@@ -119,12 +122,12 @@ def build_ollama_router(
         req: OllamaChatRequest,
     ) -> StreamingResponse | dict[str, Any]:
         params = _params_from_ollama_options(req.options)
-        prompt = _prompt_from_messages(req.messages)
+        turns = _to_chat_turns(req.messages)
         created_at = datetime.now(UTC).isoformat()
 
         async def emit() -> AsyncIterator[str]:
             finish: str | None = None
-            async for tok in engine.stream_completion(req.model, prompt, params):
+            async for tok in engine.stream_chat(req.model, turns, params):
                 if tok.text:
                     yield _nd(
                         {
@@ -149,7 +152,7 @@ def build_ollama_router(
         if req.stream:
             return StreamingResponse(emit(), media_type="application/x-ndjson")
 
-        text, finish = await collect_completion(engine, req.model, prompt, params)
+        text, finish = await collect_chat(engine, req.model, turns, params)
         return {
             "model": req.model,
             "created_at": created_at,

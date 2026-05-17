@@ -25,9 +25,9 @@ async def test_chat_completion_non_streaming(
     assert choice["message"]["content"] == "Hello, world!"
     assert choice["finish_reason"] == "stop"
 
-    assert len(fake_engine.calls) == 1
-    call = fake_engine.calls[0]
+    assert len(fake_engine.chat_calls) == 1
+    call = fake_engine.chat_calls[0]
     assert call.model == "gemma-4-e2b"
-    assert "Hi" in call.prompt
+    assert any(m.content == "Hi" for m in call.messages)
     assert call.params.max_tokens == 50
     assert call.params.temperature == 0.5

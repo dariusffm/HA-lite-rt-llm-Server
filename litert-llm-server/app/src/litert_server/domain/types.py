@@ -50,3 +50,12 @@ class PullProgress(BaseModel):
     bytes_total: int = Field(ge=0)
     status: PullStatus
     error: str | None = None
+
+
+class ChatTurn(BaseModel):
+    """A single role-tagged turn in a chat conversation."""
+
+    model_config = ConfigDict(frozen=True)
+
+    role: str
+    content: str
