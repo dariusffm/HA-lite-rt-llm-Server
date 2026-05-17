@@ -51,6 +51,13 @@ class OllamaChatRequest(BaseModel):
     options: dict[str, Any] | None = None
 
 
+class OllamaGenerateRequest(BaseModel):
+    model: str
+    prompt: str
+    stream: bool = True
+    options: dict[str, Any] | None = None
+
+
 def _params_from_ollama_options(options: dict[str, Any] | None) -> GenerationParams:
     options = options or {}
     return GenerationParams(
@@ -136,6 +143,53 @@ def build_ollama_router(
             "model": req.model,
             "created_at": created_at,
             "message": {"role": "assistant", "content": "".join(text_parts)},
+            "done": True,
+            "done_reason": finish or "stop",
+        }
+
+    @router.post("/generate", response_model=None)
+    async def generate(
+        req: OllamaGenerateRequest,
+    ) -> StreamingResponse | dict[str, Any]:
+        params = _params_from_ollama_options(req.options)
+        created_at = datetime.now(UTC).isoformat()
+
+        async def emit() -> AsyncIterator[str]:
+            finish: str | None = None
+            async for tok in engine.stream_completion(req.model, req.prompt, params):
+                if tok.finish_reason is not None:
+                    finish = tok.finish_reason
+                yield json.dumps(
+                    {
+                        "model": req.model,
+                        "created_at": created_at,
+                        "response": tok.text,
+                        "done": False,
+                    }
+                ) + "\n"
+            yield json.dumps(
+                {
+                    "model": req.model,
+                    "created_at": created_at,
+                    "response": "",
+                    "done": True,
+                    "done_reason": finish or "stop",
+                }
+            ) + "\n"
+
+        if req.stream:
+            return StreamingResponse(emit(), media_type="application/x-ndjson")
+
+        text_parts: list[str] = []
+        finish: str | None = None
+        async for tok in engine.stream_completion(req.model, req.prompt, params):
+            text_parts.append(tok.text)
+            if tok.finish_reason is not None:
+                finish = tok.finish_reason
+        return {
+            "model": req.model,
+            "created_at": created_at,
+            "response": "".join(text_parts),
             "done": True,
             "done_reason": finish or "stop",
         }
