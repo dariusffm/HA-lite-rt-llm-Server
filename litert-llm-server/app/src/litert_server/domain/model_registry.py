@@ -22,7 +22,7 @@ class ModelRegistry(Protocol):
     async def get(self, name: str) -> ModelInfo:
         ...
 
-    async def pull(self, name: str) -> AsyncIterator[PullProgress]:
+    def pull(self, name: str) -> AsyncIterator[PullProgress]:
         ...
 
     async def delete(self, name: str) -> None:

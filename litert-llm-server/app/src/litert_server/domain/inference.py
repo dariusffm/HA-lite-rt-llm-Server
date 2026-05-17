@@ -16,7 +16,7 @@ class InferenceService(Protocol):
     against this Protocol — never against a concrete engine class.
     """
 
-    async def stream_completion(
+    def stream_completion(
         self,
         model: str,
         prompt: str,

@@ -62,6 +62,30 @@ class ChatCompletionResponse(BaseModel):
     choices: list[ChatCompletionChoice]
 
 
+class CompletionRequest(BaseModel):
+    model: str
+    prompt: str
+    max_tokens: int = Field(default=512, ge=1, le=32768)
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    top_p: float | None = Field(default=None, ge=0.0, le=1.0)
+    stop: list[str] | None = None
+    stream: bool = False
+
+
+class CompletionChoice(BaseModel):
+    text: str
+    index: int = 0
+    finish_reason: Literal["stop", "length"] | None
+
+
+class CompletionResponse(BaseModel):
+    id: str
+    object: str = "text_completion"
+    created: int
+    model: str
+    choices: list[CompletionChoice]
+
+
 def _render_chat_prompt(messages: list[ChatMessage]) -> str:
     """Minimal multi-turn chat template. Engines that need a model-specific
     template can override later; this MVP joins roles with simple tags.
@@ -88,8 +112,8 @@ async def _chat_sse_stream(
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
     created = int(time.time())
 
-    def frame(delta: dict, finish: str | None = None) -> str:
-        chunk = {
+    def frame(delta: dict[str, object], finish: str | None = None) -> str:
+        chunk: dict[str, object] = {
             "id": completion_id,
             "object": "chat.completion.chunk",
             "created": created,
@@ -127,8 +151,10 @@ def build_openai_router(
             data=[OpenAIModelItem(id=m.name, created=now) for m in models],
         )
 
-    @router.post("/chat/completions")
-    async def chat_completions(req: ChatCompletionRequest):
+    @router.post("/chat/completions", response_model=None)
+    async def chat_completions(
+        req: ChatCompletionRequest,
+    ) -> StreamingResponse | ChatCompletionResponse:
         params = GenerationParams(
             max_tokens=req.max_tokens,
             temperature=req.temperature,
@@ -159,6 +185,32 @@ def build_openai_router(
                     index=0,
                     message=ChatMessage(role="assistant", content="".join(text_parts)),
                     finish_reason=finish,
+                )
+            ],
+        )
+
+    @router.post("/completions", response_model=CompletionResponse)
+    async def completions(req: CompletionRequest) -> CompletionResponse:
+        params = GenerationParams(
+            max_tokens=req.max_tokens,
+            temperature=req.temperature,
+            top_p=req.top_p,
+            stop=req.stop,
+        )
+        text_parts: list[str] = []
+        finish: Literal["stop", "length"] | None = None
+        async for tok in engine.stream_completion(req.model, req.prompt, params):
+            text_parts.append(tok.text)
+            if tok.finish_reason is not None:
+                finish = tok.finish_reason
+
+        return CompletionResponse(
+            id=f"cmpl-{uuid.uuid4().hex}",
+            created=int(time.time()),
+            model=req.model,
+            choices=[
+                CompletionChoice(
+                    text="".join(text_parts), index=0, finish_reason=finish
                 )
             ],
         )
