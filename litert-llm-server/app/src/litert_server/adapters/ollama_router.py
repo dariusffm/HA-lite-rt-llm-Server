@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -61,6 +61,14 @@ class OllamaGenerateRequest(BaseModel):
 class OllamaPullRequest(BaseModel):
     name: str
     stream: bool = True
+
+
+class OllamaShowRequest(BaseModel):
+    name: str
+
+
+class OllamaDeleteRequest(BaseModel):
+    name: str
 
 
 def _params_from_ollama_options(options: dict[str, Any] | None) -> GenerationParams:
@@ -228,5 +236,28 @@ def build_ollama_router(
             if prog.status == "error":
                 last_status = "error"
         return {"status": last_status}
+
+    @router.post("/show")
+    async def show(req: OllamaShowRequest) -> dict[str, Any]:
+        try:
+            m = await registry.get(req.name)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="model not found") from exc
+        return {
+            "modelfile": "",
+            "parameters": "",
+            "template": "",
+            "details": {
+                "format": "gguf",
+                "family": "gemma",
+                "parameter_size": "2B",
+                "quantization_level": m.quantization,
+            },
+        }
+
+    @router.delete("/delete")
+    async def delete(req: OllamaDeleteRequest) -> dict[str, Any]:
+        await registry.delete(req.name)
+        return {"status": "success"}
 
     return router
