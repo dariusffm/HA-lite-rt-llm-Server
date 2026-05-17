@@ -13,13 +13,14 @@ forbidden_modules =
     litert_server.model_registry
 
 [importlinter:contract:adapters-do-not-know-engines]
-name = Adapters never import engines or registry concretions
+name = Adapters never import engines, registry, config, or third-party SDKs
 type = forbidden
 source_modules =
     litert_server.adapters
 forbidden_modules =
     litert_server.engines
     litert_server.model_registry
+    litert_server.config
     litert_lm
     huggingface_hub
 

@@ -17,5 +17,6 @@ def test_import_linter_contracts_pass() -> None:
         cwd=app_root,
         capture_output=True,
         text=True,
+        timeout=60,
     )
     assert result.returncode == 0, result.stdout + "\n" + result.stderr
