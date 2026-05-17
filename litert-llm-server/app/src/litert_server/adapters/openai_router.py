@@ -16,8 +16,9 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from litert_server.domain.inference import InferenceService
+from litert_server.domain.inference import InferenceService, collect_completion
 from litert_server.domain.model_registry import ModelRegistry
+from litert_server.domain.prompting import ChatTurn, render_chat_prompt
 from litert_server.domain.types import GenerationParams
 
 
@@ -86,15 +87,17 @@ class CompletionResponse(BaseModel):
     choices: list[CompletionChoice]
 
 
-def _render_chat_prompt(messages: list[ChatMessage]) -> str:
-    """Minimal multi-turn chat template. Engines that need a model-specific
-    template can override later; this MVP joins roles with simple tags.
-    """
-    parts: list[str] = []
-    for msg in messages:
-        parts.append(f"<|{msg.role}|>\n{msg.content}")
-    parts.append("<|assistant|>\n")
-    return "\n".join(parts)
+def _prompt_from_messages(messages: list[ChatMessage]) -> str:
+    return render_chat_prompt(ChatTurn(role=m.role, content=m.content) for m in messages)
+
+
+def _gen_params(req: ChatCompletionRequest | CompletionRequest) -> GenerationParams:
+    return GenerationParams(
+        max_tokens=req.max_tokens,
+        temperature=req.temperature,
+        top_p=req.top_p,
+        stop=req.stop,
+    )
 
 
 async def _chat_sse_stream(
@@ -128,9 +131,10 @@ async def _chat_sse_stream(
 
     finish_reason: str | None = None
     async for tok in engine.stream_completion(model, prompt, params):
+        if tok.text:
+            yield frame({"content": tok.text}, finish=None)
         if tok.finish_reason is not None:
             finish_reason = tok.finish_reason
-        yield frame({"content": tok.text}, finish=None)
 
     yield frame({}, finish=finish_reason or "stop")
     yield "data: [DONE]\n\n"
@@ -155,13 +159,8 @@ def build_openai_router(
     async def chat_completions(
         req: ChatCompletionRequest,
     ) -> StreamingResponse | ChatCompletionResponse:
-        params = GenerationParams(
-            max_tokens=req.max_tokens,
-            temperature=req.temperature,
-            top_p=req.top_p,
-            stop=req.stop,
-        )
-        prompt = _render_chat_prompt(req.messages)
+        params = _gen_params(req)
+        prompt = _prompt_from_messages(req.messages)
 
         if req.stream:
             return StreamingResponse(
@@ -169,13 +168,7 @@ def build_openai_router(
                 media_type="text/event-stream",
             )
 
-        text_parts: list[str] = []
-        finish: Literal["stop", "length"] | None = None
-        async for tok in engine.stream_completion(req.model, prompt, params):
-            text_parts.append(tok.text)
-            if tok.finish_reason is not None:
-                finish = tok.finish_reason
-
+        text, finish = await collect_completion(engine, req.model, prompt, params)
         return ChatCompletionResponse(
             id=f"chatcmpl-{uuid.uuid4().hex}",
             created=int(time.time()),
@@ -183,7 +176,7 @@ def build_openai_router(
             choices=[
                 ChatCompletionChoice(
                     index=0,
-                    message=ChatMessage(role="assistant", content="".join(text_parts)),
+                    message=ChatMessage(role="assistant", content=text),
                     finish_reason=finish,
                 )
             ],
@@ -191,28 +184,13 @@ def build_openai_router(
 
     @router.post("/completions", response_model=CompletionResponse)
     async def completions(req: CompletionRequest) -> CompletionResponse:
-        params = GenerationParams(
-            max_tokens=req.max_tokens,
-            temperature=req.temperature,
-            top_p=req.top_p,
-            stop=req.stop,
-        )
-        text_parts: list[str] = []
-        finish: Literal["stop", "length"] | None = None
-        async for tok in engine.stream_completion(req.model, req.prompt, params):
-            text_parts.append(tok.text)
-            if tok.finish_reason is not None:
-                finish = tok.finish_reason
-
+        params = _gen_params(req)
+        text, finish = await collect_completion(engine, req.model, req.prompt, params)
         return CompletionResponse(
             id=f"cmpl-{uuid.uuid4().hex}",
             created=int(time.time()),
             model=req.model,
-            choices=[
-                CompletionChoice(
-                    text="".join(text_parts), index=0, finish_reason=finish
-                )
-            ],
+            choices=[CompletionChoice(text=text, index=0, finish_reason=finish)],
         )
 
     return router

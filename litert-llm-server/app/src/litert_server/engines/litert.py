@@ -20,9 +20,15 @@ from pathlib import Path
 from threading import Lock, Thread
 from typing import Any
 
+from litert_lm import Backend, Engine, SamplerConfig
+
 from litert_server.domain.types import GenerationParams, Token
 
 _SENTINEL: Any = object()
+
+# ~2s buffer at 30 tok/s — enough headroom to absorb network jitter to the
+# HTTP client without unbounded memory growth.
+_TOKEN_QUEUE_MAX = 64
 
 
 class LiteRTEngine:
@@ -38,10 +44,8 @@ class LiteRTEngine:
         return self.models_dir / f"{model_name}.litertlm"
 
     def _ensure_loaded(self, model_name: str) -> None:
-        from litert_lm import Backend, Engine
-
         with self._lock:
-            if self.current_model == model_name and self._engine is not None:
+            if self.current_model == model_name:
                 return
             file = self._model_file(model_name)
             if not file.exists():
@@ -51,9 +55,7 @@ class LiteRTEngine:
             self._engine = Engine(model_path=str(file), backend=Backend.CPU)
             self.current_model = model_name
 
-    def _build_sampler(self, params: GenerationParams) -> Any:
-        from litert_lm import SamplerConfig
-
+    def _build_sampler(self, params: GenerationParams) -> SamplerConfig:
         kwargs: dict[str, Any] = {"temperature": params.temperature}
         if params.top_p is not None:
             kwargs["top_p"] = params.top_p
@@ -74,18 +76,19 @@ class LiteRTEngine:
             max_output_tokens=params.max_tokens,
         )
 
-        q: queue.Queue[Any] = queue.Queue(maxsize=64)
+        q: queue.Queue[Any] = queue.Queue(maxsize=_TOKEN_QUEUE_MAX)
 
         def producer() -> None:
             try:
                 session.run_prefill([prompt])
                 for resp in session.run_decode_async():
-                    # Responses.texts is a list (batch). MVP = batch size 1.
                     if resp.texts:
                         q.put(resp.texts[0])
-            except Exception as exc:  # surface to consumer
+            except Exception as exc:
                 q.put(exc)
             finally:
+                # Best-effort cleanup; the C session is opaque and may
+                # already be closed by cancel_process().
                 try:
                     session.close()
                 except Exception:
@@ -107,7 +110,8 @@ class LiteRTEngine:
                 yield Token(text=str(item), index=index, finish_reason=None)
                 index += 1
         except GeneratorExit:
-            # Consumer cancelled; ask litert_lm to abort the in-flight decode.
+            # HTTP client disconnected mid-stream; abort the in-flight
+            # decode so the producer thread can exit promptly.
             try:
                 session.cancel_process()
             except Exception:

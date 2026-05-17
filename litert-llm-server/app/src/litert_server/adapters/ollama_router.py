@@ -15,14 +15,15 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from litert_server.domain.inference import InferenceService
+from litert_server.domain.inference import InferenceService, collect_completion
 from litert_server.domain.model_registry import ModelRegistry
+from litert_server.domain.prompting import ChatTurn, render_chat_prompt
 from litert_server.domain.types import GenerationParams
 
 
 class OllamaModelDetails(BaseModel):
     format: str = "gguf"
-    family: str = "gemma"
+    family: str = "gemma"  # TODO Phase 7: derive from ModelInfo / registry catalog
     parameter_size: str = "2B"
     quantization_level: str
 
@@ -81,12 +82,13 @@ def _params_from_ollama_options(options: dict[str, Any] | None) -> GenerationPar
     )
 
 
-def _render_chat_prompt(messages: list[OllamaChatMessage]) -> str:
-    parts: list[str] = []
-    for msg in messages:
-        parts.append(f"<|{msg.role}|>\n{msg.content}")
-    parts.append("<|assistant|>\n")
-    return "\n".join(parts)
+def _prompt_from_messages(messages: list[OllamaChatMessage]) -> str:
+    return render_chat_prompt(ChatTurn(role=m.role, content=m.content) for m in messages)
+
+
+def _nd(obj: dict[str, Any]) -> str:
+    """Encode a single NDJSON record (JSON object + newline)."""
+    return json.dumps(obj) + "\n"
 
 
 def build_ollama_router(
@@ -117,23 +119,24 @@ def build_ollama_router(
         req: OllamaChatRequest,
     ) -> StreamingResponse | dict[str, Any]:
         params = _params_from_ollama_options(req.options)
-        prompt = _render_chat_prompt(req.messages)
+        prompt = _prompt_from_messages(req.messages)
         created_at = datetime.now(UTC).isoformat()
 
         async def emit() -> AsyncIterator[str]:
             finish: str | None = None
             async for tok in engine.stream_completion(req.model, prompt, params):
+                if tok.text:
+                    yield _nd(
+                        {
+                            "model": req.model,
+                            "created_at": created_at,
+                            "message": {"role": "assistant", "content": tok.text},
+                            "done": False,
+                        }
+                    )
                 if tok.finish_reason is not None:
                     finish = tok.finish_reason
-                yield json.dumps(
-                    {
-                        "model": req.model,
-                        "created_at": created_at,
-                        "message": {"role": "assistant", "content": tok.text},
-                        "done": False,
-                    }
-                ) + "\n"
-            yield json.dumps(
+            yield _nd(
                 {
                     "model": req.model,
                     "created_at": created_at,
@@ -141,23 +144,18 @@ def build_ollama_router(
                     "done": True,
                     "done_reason": finish or "stop",
                 }
-            ) + "\n"
+            )
 
         if req.stream:
             return StreamingResponse(emit(), media_type="application/x-ndjson")
 
-        text_parts: list[str] = []
-        finish: str | None = None
-        async for tok in engine.stream_completion(req.model, prompt, params):
-            text_parts.append(tok.text)
-            if tok.finish_reason is not None:
-                finish = tok.finish_reason
+        text, finish = await collect_completion(engine, req.model, prompt, params)
         return {
             "model": req.model,
             "created_at": created_at,
-            "message": {"role": "assistant", "content": "".join(text_parts)},
+            "message": {"role": "assistant", "content": text},
             "done": True,
-            "done_reason": finish or "stop",
+            "done_reason": finish,
         }
 
     @router.post("/generate", response_model=None)
@@ -170,17 +168,18 @@ def build_ollama_router(
         async def emit() -> AsyncIterator[str]:
             finish: str | None = None
             async for tok in engine.stream_completion(req.model, req.prompt, params):
+                if tok.text:
+                    yield _nd(
+                        {
+                            "model": req.model,
+                            "created_at": created_at,
+                            "response": tok.text,
+                            "done": False,
+                        }
+                    )
                 if tok.finish_reason is not None:
                     finish = tok.finish_reason
-                yield json.dumps(
-                    {
-                        "model": req.model,
-                        "created_at": created_at,
-                        "response": tok.text,
-                        "done": False,
-                    }
-                ) + "\n"
-            yield json.dumps(
+            yield _nd(
                 {
                     "model": req.model,
                     "created_at": created_at,
@@ -188,23 +187,18 @@ def build_ollama_router(
                     "done": True,
                     "done_reason": finish or "stop",
                 }
-            ) + "\n"
+            )
 
         if req.stream:
             return StreamingResponse(emit(), media_type="application/x-ndjson")
 
-        text_parts: list[str] = []
-        finish: str | None = None
-        async for tok in engine.stream_completion(req.model, req.prompt, params):
-            text_parts.append(tok.text)
-            if tok.finish_reason is not None:
-                finish = tok.finish_reason
+        text, finish = await collect_completion(engine, req.model, req.prompt, params)
         return {
             "model": req.model,
             "created_at": created_at,
-            "response": "".join(text_parts),
+            "response": text,
             "done": True,
-            "done_reason": finish or "stop",
+            "done_reason": finish,
         }
 
     @router.post("/pull", response_model=None)
@@ -214,19 +208,17 @@ def build_ollama_router(
         async def emit() -> AsyncIterator[str]:
             async for prog in registry.pull(req.name):
                 if prog.status == "done":
-                    yield json.dumps({"status": "success"}) + "\n"
+                    yield _nd({"status": "success"})
                 elif prog.status == "error":
-                    yield json.dumps(
-                        {"status": "error", "error": prog.error or "unknown"}
-                    ) + "\n"
+                    yield _nd({"status": "error", "error": prog.error or "unknown"})
                 else:
-                    yield json.dumps(
+                    yield _nd(
                         {
                             "status": "downloading",
                             "completed": prog.bytes_done,
                             "total": prog.bytes_total,
                         }
-                    ) + "\n"
+                    )
 
         if req.stream:
             return StreamingResponse(emit(), media_type="application/x-ndjson")
