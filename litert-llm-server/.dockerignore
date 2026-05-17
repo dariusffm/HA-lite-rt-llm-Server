@@ -1,0 +1,10 @@
+app/.venv
+app/.pytest_cache
+app/.mypy_cache
+app/.ruff_cache
+app/.models
+app/.import_linter_cache
+app/tests
+app/scripts
+**/__pycache__
+**/*.py[cod]
