@@ -58,6 +58,11 @@ class OllamaGenerateRequest(BaseModel):
     options: dict[str, Any] | None = None
 
 
+class OllamaPullRequest(BaseModel):
+    name: str
+    stream: bool = True
+
+
 def _params_from_ollama_options(options: dict[str, Any] | None) -> GenerationParams:
     options = options or {}
     return GenerationParams(
@@ -193,5 +198,35 @@ def build_ollama_router(
             "done": True,
             "done_reason": finish or "stop",
         }
+
+    @router.post("/pull", response_model=None)
+    async def pull(
+        req: OllamaPullRequest,
+    ) -> StreamingResponse | dict[str, Any]:
+        async def emit() -> AsyncIterator[str]:
+            async for prog in registry.pull(req.name):
+                if prog.status == "done":
+                    yield json.dumps({"status": "success"}) + "\n"
+                elif prog.status == "error":
+                    yield json.dumps(
+                        {"status": "error", "error": prog.error or "unknown"}
+                    ) + "\n"
+                else:
+                    yield json.dumps(
+                        {
+                            "status": "downloading",
+                            "completed": prog.bytes_done,
+                            "total": prog.bytes_total,
+                        }
+                    ) + "\n"
+
+        if req.stream:
+            return StreamingResponse(emit(), media_type="application/x-ndjson")
+
+        last_status = "success"
+        async for prog in registry.pull(req.name):
+            if prog.status == "error":
+                last_status = "error"
+        return {"status": last_status}
 
     return router
