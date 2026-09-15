@@ -33,6 +33,7 @@ class OllamaModelDetails(BaseModel):
 
 class OllamaModelItem(BaseModel):
     name: str
+    model: str  # same as name; HA's Ollama integration reads this key
     modified_at: str
     size: int
     digest: str = ""
@@ -109,6 +110,7 @@ def build_ollama_router(
             models=[
                 OllamaModelItem(
                     name=m.name,
+                    model=m.name,
                     modified_at=now_iso,
                     size=m.size_bytes,
                     details=OllamaModelDetails(quantization_level=m.quantization),

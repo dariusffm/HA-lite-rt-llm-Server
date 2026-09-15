@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3 — 2026-09-15
+
+- `/api/tags` entries now carry `model` in addition to `name`, as real
+  Ollama does. Home Assistant's Ollama integration reads `model` and
+  crashed with `KeyError` when adding a conversation agent.
+
 ## 0.1.2 — 2026-09-15
 
 - Fix `/api/pull` still failing after 0.1.1 when a dangling model symlink
