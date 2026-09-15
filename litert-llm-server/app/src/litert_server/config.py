@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     models_dir: Path = Path("/data/models")
     port: int = 8080
     preload_models: list[str] = []
+    tool_calling: bool = True
     hf_token: str | None = Field(default=None, validation_alias="HF_TOKEN")
 
     @field_validator("preload_models", mode="before")

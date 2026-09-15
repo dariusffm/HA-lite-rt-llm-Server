@@ -41,3 +41,17 @@ def test_empty_hf_token_becomes_none(monkeypatch):
     monkeypatch.setenv("HF_TOKEN", "")
     s = Settings()
     assert s.hf_token is None
+
+
+def test_tool_calling_env_false(monkeypatch):
+    monkeypatch.setenv("LITERT_TOOL_CALLING", "false")
+    from litert_server.config import Settings
+
+    assert Settings().tool_calling is False
+
+
+def test_tool_calling_defaults_true(monkeypatch):
+    monkeypatch.delenv("LITERT_TOOL_CALLING", raising=False)
+    from litert_server.config import Settings
+
+    assert Settings().tool_calling is True

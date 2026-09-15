@@ -13,6 +13,8 @@ fakes.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 
 from litert_server.adapters.ollama_router import build_ollama_router
@@ -24,13 +26,16 @@ from litert_server.engines.litert import LiteRTEngine
 from litert_server.model_registry.filesystem import FilesystemCache
 from litert_server.model_registry.huggingface import HuggingFaceRegistry
 
+log = logging.getLogger("litert_server")
+
 
 def build_app(
     *,
     engine: InferenceService,
     registry: ModelRegistry,
+    tools_enabled: bool = True,
 ) -> FastAPI:
-    app = FastAPI(title="litert-llm-server", version="0.1.0")
+    app = FastAPI(title="litert-llm-server", version="0.2.0")
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
@@ -48,8 +53,13 @@ def build_app(
         models = await registry.list()
         return {"status": "ready" if models else "no-models", "ready": bool(models)}
 
-    app.include_router(build_openai_router(engine=engine, registry=registry))
-    app.include_router(build_ollama_router(engine=engine, registry=registry))
+    app.include_router(build_openai_router(
+        engine=engine, registry=registry, tools_enabled=tools_enabled
+    ))
+    app.include_router(build_ollama_router(
+        engine=engine, registry=registry, tools_enabled=tools_enabled
+    ))
+    log.info("tool calling: %s", "enabled" if tools_enabled else "disabled")
     return app
 
 
@@ -59,4 +69,4 @@ def make_production_app() -> FastAPI:
     cache = FilesystemCache(root=settings.models_dir)
     registry = HuggingFaceRegistry(cache=cache, hf_token=settings.hf_token)
     engine = LiteRTEngine(models_dir=settings.models_dir)
-    return build_app(engine=engine, registry=registry)
+    return build_app(engine=engine, registry=registry, tools_enabled=settings.tool_calling)
