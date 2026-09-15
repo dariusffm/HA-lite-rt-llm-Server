@@ -11,7 +11,7 @@ from typing import Any
 
 from litert_lm import Backend, Engine, SamplerConfig
 
-from litert_server.domain.types import ChatTurn, GenerationParams, Token
+from litert_server.domain.types import ChatTurn, GenerationParams, Token, ToolSpec
 
 _SENTINEL: Any = object()
 
@@ -141,6 +141,7 @@ class LiteRTEngine:
         model: str,
         messages: list[ChatTurn],
         params: GenerationParams,
+        tools: list[ToolSpec] | None = None,
     ) -> AsyncIterator[Token]:
         if not messages:
             raise ValueError("messages must not be empty")

@@ -55,7 +55,7 @@ class ChatCompletionRequest(BaseModel):
 class ChatCompletionChoice(BaseModel):
     index: int
     message: ChatMessage
-    finish_reason: Literal["stop", "length"] | None
+    finish_reason: Literal["stop", "length", "tool_calls"] | None
 
 
 class ChatCompletionResponse(BaseModel):
@@ -79,7 +79,7 @@ class CompletionRequest(BaseModel):
 class CompletionChoice(BaseModel):
     text: str
     index: int = 0
-    finish_reason: Literal["stop", "length"] | None
+    finish_reason: Literal["stop", "length", "tool_calls"] | None
 
 
 class CompletionResponse(BaseModel):
@@ -156,7 +156,7 @@ def build_openai_router(
         if req.stream:
             return StreamingResponse(sse_stream(), media_type="text/event-stream")
 
-        text, finish = await collect_chat(engine, req.model, turns, params)
+        text, finish, _ = await collect_chat(engine, req.model, turns, params)
         return ChatCompletionResponse(
             id=f"chatcmpl-{uuid.uuid4().hex}",
             created=int(time.time()),

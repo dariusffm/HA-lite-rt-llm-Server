@@ -9,10 +9,9 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-
 from typing import Literal, cast
 
-from litert_server.domain.types import ChatTurn, GenerationParams, Token
+from litert_server.domain.types import ChatTurn, GenerationParams, Token, ToolSpec
 
 
 @dataclass
@@ -72,6 +71,7 @@ class FakeEngine:
         model: str,
         messages: list[ChatTurn],
         params: GenerationParams,
+        tools: list[ToolSpec] | None = None,
     ) -> AsyncIterator[Token]:
         self.chat_calls.append(
             FakeChatCall(model=model, messages=list(messages), params=params)

@@ -154,7 +154,7 @@ def build_ollama_router(
         if req.stream:
             return StreamingResponse(emit(), media_type="application/x-ndjson")
 
-        text, finish = await collect_chat(engine, req.model, turns, params)
+        text, finish, _ = await collect_chat(engine, req.model, turns, params)
         return {
             "model": req.model,
             "created_at": created_at,
