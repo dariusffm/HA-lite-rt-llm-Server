@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 — 2026-09-15
+
+- New option `context_length` (default 8192, range 2048-32768), passed
+  through to `litert_lm.Engine` as `max_num_tokens`. Fixes Home Assistant
+  Assist prompts exceeding the previous hardcoded 4096-token library
+  default.
+- Streaming errors from the engine are now returned as clean Ollama/OpenAI
+  error records instead of dropping the connection mid-response.
+
 ## 0.2.0 — 2026-09-15
 
 - Client-side tool calling on both APIs: `tools` in requests, `tool_calls` in

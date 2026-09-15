@@ -8,8 +8,9 @@ Assist, MCP tools).
 
 ## Supported Models (MVP)
 
-All models use the LiteRT-LM `.litertlm` format. Context window: up to
-32k tokens (prompt + completion combined).
+All models use the LiteRT-LM `.litertlm` format. Context window:
+`context_length` option, default 8192 tokens (model supports up to 32k);
+prompt + completion combined.
 
 | Name | Repository | Gated | File Size | Tool calling |
 |---|---|---|---|---|
@@ -49,5 +50,6 @@ with HTTP 401.
 | `default_model` | `gemma-4-e2b` | Model used when a request omits `model` |
 | `max_tokens` | 1024 | Default upper bound; can be raised up to 32768 (the LiteRT-LM context window) |
 | `temperature` | 0.7 | Default sampling temperature |
+| `context_length` | 8192 | Context window (tokens); range 2048-32768 (model supports up to 32k) |
 | `preload_models` | `[]` | Model names to pull on startup |
 | `hf_token` | `""` | HuggingFace read token; required only for gated `google/*` models |

@@ -58,6 +58,10 @@ Small models (Gemma 4 E2B) sometimes emit malformed tool arguments; Home
 Assistant repairs common cases. Keep the number of exposed entities small to
 save context.
 
+Home Assistant's agent option *Größe des Kontextfensters* (`num_ctx`) must
+not exceed the add-on's `context_length`; the add-on ignores `num_ctx`. With
+many exposed entities raise `context_length` (more RAM).
+
 ## Using with Node-RED
 
 Use any Ollama node and point it to `http://<add-on-hostname>:8080`.
@@ -141,8 +145,9 @@ Google names two options: **Gemma 4** (E2B/E4B/12B) for agentic chat, and
 
 ## Limits (MVP)
 
-- **Context window: 32k tokens** (prompt + completion combined). Long
-  multi-turn conversations may exhaust it; no automatic truncation in MVP.
+- **Context window: `context_length` option, default 8192 tokens (model
+  supports up to 32k); prompt + completion combined**. Long multi-turn
+  conversations may exhaust it; no automatic truncation in MVP.
 - Single-slot engine: switching models mid-flight triggers a reload.
 - No request queue: concurrent requests serialize.
 - No authentication: rely on HA's internal network.
