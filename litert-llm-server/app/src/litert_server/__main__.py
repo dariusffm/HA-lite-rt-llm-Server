@@ -26,7 +26,7 @@ from litert_server.engines.litert import LiteRTEngine
 from litert_server.model_registry.filesystem import FilesystemCache
 from litert_server.model_registry.huggingface import HuggingFaceRegistry
 
-log = logging.getLogger("litert_server")
+log = logging.getLogger(__name__)
 
 
 def build_app(
@@ -35,7 +35,7 @@ def build_app(
     registry: ModelRegistry,
     tools_enabled: bool = True,
 ) -> FastAPI:
-    app = FastAPI(title="litert-llm-server", version="0.2.0")
+    app = FastAPI(title="litert-llm-server", version="0.2.2")
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

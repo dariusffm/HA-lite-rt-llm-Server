@@ -58,6 +58,15 @@ class FakeEngine:
             out.append(Token(text=text, index=i, finish_reason=finish if is_last else None))
         return out
 
+    async def _scripted(self) -> AsyncIterator[Token]:
+        if self.raise_error:
+            if self.raise_after is not None:
+                for tok in self._yield_tokens()[: self.raise_after]:
+                    yield tok
+            raise self.raise_error
+        for tok in self._yield_tokens():
+            yield tok
+
     async def stream_completion(
         self,
         model: str,
@@ -65,12 +74,7 @@ class FakeEngine:
         params: GenerationParams,
     ) -> AsyncIterator[Token]:
         self.completion_calls.append(FakeEngineCall(model=model, prompt=prompt, params=params))
-        if self.raise_error:
-            if self.raise_after is not None:
-                for tok in self._yield_tokens()[: self.raise_after]:
-                    yield tok
-            raise self.raise_error
-        for tok in self._yield_tokens():
+        async for tok in self._scripted():
             yield tok
 
     async def stream_chat(
@@ -83,14 +87,9 @@ class FakeEngine:
         self.chat_calls.append(
             FakeChatCall(model=model, messages=list(messages), params=params, tools=tools)
         )
-        if self.raise_error:
-            if self.raise_after is not None:
-                for tok in self._yield_tokens()[: self.raise_after]:
-                    yield tok
-            raise self.raise_error
         # Mirrors reality: no tools offered -> the model cannot call one.
         if self.tool_calls and tools is not None:
             yield Token(text="", index=0, finish_reason="tool_calls", tool_calls=self.tool_calls)
             return
-        for tok in self._yield_tokens():
+        async for tok in self._scripted():
             yield tok

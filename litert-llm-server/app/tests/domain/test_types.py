@@ -9,6 +9,8 @@ from litert_server.domain.types import (
     Token,
     ToolCall,
     ToolSpec,
+    coerce_tool_arguments,
+    new_tool_call_id,
 )
 
 
@@ -74,3 +76,24 @@ def test_chat_turn_tool_role_carries_tool_name():
     turn = ChatTurn(role="tool", content='{"temperature_c": 21}', tool_name="get_weather")
     assert turn.tool_name == "get_weather"
     assert turn.tool_calls is None
+
+
+def test_coerce_tool_arguments_dict_passthrough():
+    assert coerce_tool_arguments({"city": "Frankfurt"}) == {"city": "Frankfurt"}
+
+
+def test_coerce_tool_arguments_parses_json_string():
+    assert coerce_tool_arguments('{"city": "Frankfurt"}') == {"city": "Frankfurt"}
+
+
+def test_coerce_tool_arguments_malformed_or_other_returns_empty_dict():
+    assert coerce_tool_arguments("not json") == {}
+    assert coerce_tool_arguments(None) == {}
+    assert coerce_tool_arguments(42) == {}
+
+
+def test_new_tool_call_id_starts_with_call_and_is_unique():
+    a, b = new_tool_call_id(), new_tool_call_id()
+    assert a.startswith("call_")
+    assert b.startswith("call_")
+    assert a != b

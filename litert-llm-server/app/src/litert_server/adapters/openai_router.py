@@ -18,12 +18,20 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from litert_server.domain.inference import (
+    ChatFinish,
+    CompletionFinish,
     InferenceService,
     collect_chat,
     collect_completion,
 )
 from litert_server.domain.model_registry import ModelRegistry
-from litert_server.domain.types import ChatTurn, GenerationParams, ToolCall, ToolSpec
+from litert_server.domain.types import (
+    ChatTurn,
+    GenerationParams,
+    ToolCall,
+    ToolSpec,
+    coerce_tool_arguments,
+)
 
 
 class OpenAIModelItem(BaseModel):
@@ -82,7 +90,7 @@ class ChatCompletionRequest(BaseModel):
 class ChatCompletionChoice(BaseModel):
     index: int
     message: ChatMessage
-    finish_reason: Literal["stop", "length", "tool_calls"] | None
+    finish_reason: ChatFinish | None
 
 
 class ChatCompletionResponse(BaseModel):
@@ -106,7 +114,7 @@ class CompletionRequest(BaseModel):
 class CompletionChoice(BaseModel):
     text: str
     index: int = 0
-    finish_reason: Literal["stop", "length", "tool_calls"] | None
+    finish_reason: CompletionFinish | None
 
 
 class CompletionResponse(BaseModel):
@@ -115,14 +123,6 @@ class CompletionResponse(BaseModel):
     created: int
     model: str
     choices: list[CompletionChoice]
-
-
-def _parse_args(raw: str) -> dict[str, Any]:
-    try:
-        parsed = json.loads(raw) if raw.strip() else {}
-    except json.JSONDecodeError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
 
 
 def _to_chat_turns(messages: list[ChatMessage]) -> list[ChatTurn]:
@@ -134,7 +134,9 @@ def _to_chat_turns(messages: list[ChatMessage]) -> list[ChatTurn]:
         if m.role == "assistant" and m.tool_calls:
             calls = [
                 ToolCall(
-                    id=tc.id, name=tc.function.name, arguments=_parse_args(tc.function.arguments)
+                    id=tc.id,
+                    name=tc.function.name,
+                    arguments=coerce_tool_arguments(tc.function.arguments),
                 )
                 for tc in m.tool_calls
             ]
@@ -175,7 +177,21 @@ def _tool_calls_wire(calls: list[ToolCall], *, with_index: bool) -> list[dict[st
     return out
 
 
-log = logging.getLogger("litert_server")
+log = logging.getLogger(__name__)
+
+
+def _error_frame(exc: Exception) -> str:
+    log.exception("engine error")
+    error = {"error": {"message": str(exc), "type": "server_error"}}
+    return f"data: {json.dumps(error)}\n\n"
+
+
+def _error_response(exc: Exception) -> JSONResponse:
+    log.exception("engine error")
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"message": str(exc), "type": "server_error"}},
+    )
 
 
 def _gen_params(req: ChatCompletionRequest | CompletionRequest) -> GenerationParams:
@@ -241,9 +257,7 @@ def build_openai_router(
                     if tok.finish_reason is not None:
                         finish_reason = tok.finish_reason
             except Exception as exc:
-                log.exception("engine error")
-                error = {"error": {"message": str(exc), "type": "server_error"}}
-                yield f"data: {json.dumps(error)}\n\n"
+                yield _error_frame(exc)
                 yield "data: [DONE]\n\n"
                 return
 
@@ -256,17 +270,16 @@ def build_openai_router(
         try:
             text, finish, calls = await collect_chat(engine, req.model, turns, params, tools)
         except Exception as exc:
-            log.exception("engine error")
-            return JSONResponse(
-                status_code=500,
-                content={"error": {"message": str(exc), "type": "server_error"}},
-            )
+            return _error_response(exc)
         message = ChatMessage(
             role="assistant",
             content=text if not calls else None,
             tool_calls=[
-                OpenAIToolCall.model_validate(c)
-                for c in _tool_calls_wire(calls, with_index=False)
+                OpenAIToolCall(
+                    id=c.id,
+                    function=OpenAIFunctionCall(name=c.name, arguments=json.dumps(c.arguments)),
+                )
+                for c in calls
             ]
             if calls
             else None,
@@ -284,11 +297,7 @@ def build_openai_router(
         try:
             text, finish = await collect_completion(engine, req.model, req.prompt, params)
         except Exception as exc:
-            log.exception("engine error")
-            return JSONResponse(
-                status_code=500,
-                content={"error": {"message": str(exc), "type": "server_error"}},
-            )
+            return _error_response(exc)
         return CompletionResponse(
             id=f"cmpl-{uuid.uuid4().hex}",
             created=int(time.time()),

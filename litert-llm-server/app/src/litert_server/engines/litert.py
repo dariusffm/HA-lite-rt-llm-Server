@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import queue
-import uuid
 from collections.abc import AsyncIterator, Callable, Mapping
 from pathlib import Path
 from threading import Lock, Thread
@@ -14,7 +12,15 @@ from typing import Any
 from litert_lm import Backend, Engine, SamplerConfig
 from litert_lm.interfaces import Tool
 
-from litert_server.domain.types import ChatTurn, GenerationParams, Token, ToolCall, ToolSpec
+from litert_server.domain.types import (
+    ChatTurn,
+    GenerationParams,
+    Token,
+    ToolCall,
+    ToolSpec,
+    coerce_tool_arguments,
+    new_tool_call_id,
+)
 
 _SENTINEL: Any = object()
 
@@ -128,22 +134,6 @@ def _turn_to_litert(turn: ChatTurn) -> dict[str, Any]:
     return out
 
 
-def _new_call_id() -> str:
-    return f"call_{uuid.uuid4().hex[:24]}"
-
-
-def _coerce_arguments(raw: Any) -> dict[str, Any]:
-    if isinstance(raw, dict):
-        return raw
-    if isinstance(raw, str) and raw.strip():
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
-    return {}
-
-
 def _extract_tool_calls(chunk: Mapping[str, Any]) -> list[ToolCall] | None:
     """Return the tool calls in a litert_lm chunk, or ``None`` for text chunks.
 
@@ -171,8 +161,8 @@ def _extract_tool_calls(chunk: Mapping[str, Any]) -> list[ToolCall] | None:
         if not isinstance(name, str) or not name:
             continue
         raw_id = raw.get("id")
-        call_id = raw_id if isinstance(raw_id, str) and raw_id else _new_call_id()
-        arguments = _coerce_arguments(fn.get("arguments"))
+        call_id = raw_id if isinstance(raw_id, str) and raw_id else new_tool_call_id()
+        arguments = coerce_tool_arguments(fn.get("arguments"))
         calls.append(ToolCall(id=call_id, name=name, arguments=arguments))
     return calls or None
 
@@ -264,7 +254,7 @@ class LiteRTEngine:
         def producer(q: queue.Queue[Any]) -> None:
             try:
                 for chunk in conversation.send_message_async(last):
-                    calls = _extract_tool_calls(chunk)
+                    calls = _extract_tool_calls(chunk) if tools else None
                     if calls:
                         q.put(calls)
                         return

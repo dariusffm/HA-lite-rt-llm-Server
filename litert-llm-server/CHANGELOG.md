@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2 — 2026-09-15
+
+- Internal cleanup after the tool-calling phase: shared tool-argument parsing
+  and tool-call id minting in `domain/`, per-adapter error helpers, split
+  completion/chat finish types. No functional change.
+- FastAPI/OpenAPI version string now matches the add-on version.
+
 ## 0.2.1 — 2026-09-15
 
 - New option `context_length` (default 8192, range 2048-32768), passed

@@ -6,12 +6,33 @@ This module imports nothing from `engines/`, `adapters/`, or
 
 from __future__ import annotations
 
+import json
+import uuid
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 FinishReason = Literal["stop", "length", "tool_calls"] | None
+
+
+def new_tool_call_id() -> str:
+    """Mint a client-facing tool-call id (OpenAI style)."""
+    return f"call_{uuid.uuid4().hex[:24]}"
+
+
+def coerce_tool_arguments(raw: Any) -> dict[str, Any]:
+    """Best-effort dict from a tool-arguments payload: dict passthrough,
+    JSON string parsed, anything else (or malformed JSON) → {}."""
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
 
 class ToolSpec(BaseModel):

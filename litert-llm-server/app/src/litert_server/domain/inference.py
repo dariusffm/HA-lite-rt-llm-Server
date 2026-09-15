@@ -7,7 +7,8 @@ from typing import Literal, Protocol, runtime_checkable
 
 from litert_server.domain.types import ChatTurn, GenerationParams, Token, ToolCall, ToolSpec
 
-Finish = Literal["stop", "length", "tool_calls"]
+CompletionFinish = Literal["stop", "length"]
+ChatFinish = Literal["stop", "length", "tool_calls"]
 
 
 @runtime_checkable
@@ -49,9 +50,9 @@ class InferenceService(Protocol):
         ...
 
 
-async def _drain(stream: AsyncIterator[Token]) -> tuple[str, Finish, list[ToolCall] | None]:
+async def _drain(stream: AsyncIterator[Token]) -> tuple[str, ChatFinish, list[ToolCall] | None]:
     parts: list[str] = []
-    finish: Finish | None = None
+    finish: ChatFinish | None = None
     calls: list[ToolCall] | None = None
     async for tok in stream:
         parts.append(tok.text)
@@ -67,10 +68,11 @@ async def collect_completion(
     model: str,
     prompt: str,
     params: GenerationParams,
-) -> tuple[str, Finish]:
+) -> tuple[str, CompletionFinish]:
     """Drain ``stream_completion`` into a single (text, finish_reason) pair."""
     text, finish, _ = await _drain(engine.stream_completion(model, prompt, params))
-    return text, finish
+    # A completion stream never yields "tool_calls" — narrow defensively.
+    return text, finish if finish != "tool_calls" else "stop"
 
 
 async def collect_chat(
@@ -79,6 +81,6 @@ async def collect_chat(
     messages: list[ChatTurn],
     params: GenerationParams,
     tools: list[ToolSpec] | None = None,
-) -> tuple[str, Finish, list[ToolCall] | None]:
+) -> tuple[str, ChatFinish, list[ToolCall] | None]:
     """Drain ``stream_chat`` into (text, finish_reason, tool_calls)."""
     return await _drain(engine.stream_chat(model, messages, params, tools))

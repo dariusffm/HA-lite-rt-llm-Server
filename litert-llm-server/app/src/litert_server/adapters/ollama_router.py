@@ -22,7 +22,13 @@ from litert_server.domain.inference import (
     collect_completion,
 )
 from litert_server.domain.model_registry import ModelRegistry
-from litert_server.domain.types import ChatTurn, GenerationParams, ToolCall, ToolSpec
+from litert_server.domain.types import (
+    ChatTurn,
+    GenerationParams,
+    ToolCall,
+    ToolSpec,
+    new_tool_call_id,
+)
 
 
 class OllamaModelDetails(BaseModel):
@@ -122,8 +128,10 @@ def _to_chat_turns(messages: list[OllamaChatMessage]) -> list[ChatTurn]:
     for m in messages:
         if m.role == "assistant" and m.tool_calls:
             calls = [
-                ToolCall(id=f"call_{i}", name=tc.function.name, arguments=tc.function.arguments)
-                for i, tc in enumerate(m.tool_calls)
+                ToolCall(
+                    id=new_tool_call_id(), name=tc.function.name, arguments=tc.function.arguments
+                )
+                for tc in m.tool_calls
             ]
             pending = list(calls)
             turns.append(ChatTurn(role="assistant", content=m.content, tool_calls=calls))
@@ -158,7 +166,21 @@ def _nd(obj: dict[str, Any]) -> str:
     return json.dumps(obj) + "\n"
 
 
-log = logging.getLogger("litert_server")
+log = logging.getLogger(__name__)
+
+
+def _done_reason(finish: str | None) -> str:
+    return "length" if finish == "length" else "stop"
+
+
+def _error_record(exc: Exception) -> str:
+    log.exception("engine error")
+    return _nd({"error": str(exc)})
+
+
+def _error_response(exc: Exception) -> JSONResponse:
+    log.exception("engine error")
+    return JSONResponse(status_code=500, content={"error": str(exc)})
 
 
 def build_ollama_router(
@@ -195,7 +217,9 @@ def build_ollama_router(
         tools = _to_tool_specs(req.tools) if tools_enabled else None
         created_at = datetime.now(UTC).isoformat()
 
-        def record(message: dict[str, Any], done: bool, done_reason: str | None = None) -> str:
+        def record(
+            message: dict[str, Any], *, done: bool = False, done_reason: str | None = None
+        ) -> str:
             rec: dict[str, Any] = {
                 "model": req.model,
                 "created_at": created_at,
@@ -203,7 +227,7 @@ def build_ollama_router(
                 "done": done,
             }
             if done:
-                rec["done_reason"] = done_reason or "stop"
+                rec["done_reason"] = done_reason
             return _nd(rec)
 
         async def emit() -> AsyncIterator[str]:
@@ -224,14 +248,13 @@ def build_ollama_router(
                     if tok.finish_reason is not None:
                         finish = tok.finish_reason
             except Exception as exc:
-                log.exception("engine error")
-                yield _nd({"error": str(exc)})
+                yield _error_record(exc)
                 return
             # Ollama has no "tool_calls" done_reason; HA only reads `done`.
             yield record(
                 {"role": "assistant", "content": ""},
                 done=True,
-                done_reason="stop" if finish != "length" else "length",
+                done_reason=_done_reason(finish),
             )
 
         if req.stream:
@@ -240,8 +263,7 @@ def build_ollama_router(
         try:
             text, finish, calls = await collect_chat(engine, req.model, turns, params, tools)
         except Exception as exc:
-            log.exception("engine error")
-            return JSONResponse(status_code=500, content={"error": str(exc)})
+            return _error_response(exc)
         message: dict[str, Any] = {"role": "assistant", "content": text}
         if calls:
             message["tool_calls"] = _tool_calls_wire(calls)
@@ -250,7 +272,7 @@ def build_ollama_router(
             "created_at": created_at,
             "message": message,
             "done": True,
-            "done_reason": "length" if finish == "length" else "stop",
+            "done_reason": _done_reason(finish),
         }
 
     @router.post("/generate", response_model=None)
@@ -276,8 +298,7 @@ def build_ollama_router(
                     if tok.finish_reason is not None:
                         finish = tok.finish_reason
             except Exception as exc:
-                log.exception("engine error")
-                yield _nd({"error": str(exc)})
+                yield _error_record(exc)
                 return
             yield _nd(
                 {
@@ -295,8 +316,7 @@ def build_ollama_router(
         try:
             text, finish = await collect_completion(engine, req.model, req.prompt, params)
         except Exception as exc:
-            log.exception("engine error")
-            return JSONResponse(status_code=500, content={"error": str(exc)})
+            return _error_response(exc)
         return {
             "model": req.model,
             "created_at": created_at,
