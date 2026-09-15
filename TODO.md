@@ -7,15 +7,24 @@ Plan mit Schritten, Testcode und Commits: `docs/superpowers/plans/2026-09-15-too
 
 - [x] 1. `litert-lm-api` auf 0.17.0 heben (Lock + Untergrenze), Tests + lokale Inferenz
 - [x] 2. Spike: Tool-Call-Chunk-Format von `litert_lm` gegen das lokale Modell, Ergebnis nach `docs/benchmarks/`
-- [ ] 3. Domain: `ToolSpec`, `ToolCall`, `ChatTurn`/`Token` erweitern, `stream_chat(..., tools=None)`, `collect_chat` liefert Tool-Calls
-- [ ] 4. Fake-Engine: skriptbare Tool-Calls, merkt sich `tools`
-- [ ] 5. LiteRT-Engine: Tools an `create_conversation`, Historie mappen, Tool-Calls als Token
-- [ ] 6. Ollama-Adapter: `tools`, Rolle `tool`, `message.tool_calls`
-- [ ] 7. OpenAI-Adapter: `tools`, `tool_choice`, `tool_call_id`, Argumente als JSON-String, `finish_reason: tool_calls`
+- [x] 3. Domain: `ToolSpec`, `ToolCall`, `ChatTurn`/`Token` erweitern, `stream_chat(..., tools=None)`, `collect_chat` liefert Tool-Calls
+- [x] 4. Fake-Engine: skriptbare Tool-Calls, merkt sich `tools`
+- [x] 5. LiteRT-Engine: Tools an `create_conversation`, Historie mappen, Tool-Calls als Token
+- [x] 6. Ollama-Adapter: `tools`, Rolle `tool`, `message.tool_calls`
+- [x] 7. OpenAI-Adapter: `tools`, `tool_choice`, `tool_call_id`, Argumente als JSON-String, `finish_reason: tool_calls`
 - [ ] 8. Option `tool_calling` (config.yaml → `LITERT_TOOL_CALLING` → Settings → Router), Log-Zeile beim Start
 - [ ] 9. DOCS.md (HA-Einrichtung mit Assist und MCP-Websuche), CHANGELOG, Version 0.2.0, push
 - [ ] 10. Rollout auf HA, Abnahme: Assist schaltet Gerät; MCP-Websuche beantwortet Wetterfrage; Bericht nach `docs/benchmarks/`
 - [ ] 11. `simplify`-Pass, Commit, push
+
+## Repo-Umzug in HA (direkt nach Task 10)
+
+Repo wurde am 2026-09-15 zu `https://github.com/dariusffm/HA-lite-rt-llm-Server` umbenannt; HA hat noch die alte URL (GitHub leitet um). Slug/Hostname `83680c0c_…` ist ein Hash der Repo-URL und ändert sich beim Wechsel.
+- [ ] Add-on deinstallieren (löscht `/data` inkl. Modell)
+- [ ] Alte Repository-Zeile entfernen, neue URL eintragen
+- [ ] Add-on neu installieren, `tool_calling` prüfen, Modell per `/api/pull` neu ziehen
+- [ ] Ollama-Integration: URL auf den neuen Hostnamen ändern, Konversationsagent testen
+- [ ] Neuen Hostnamen in `docs/benchmarks/` und im Projektgedächtnis nachziehen
 
 ## Steuerung durch das Modell (nach 0.2.0)
 

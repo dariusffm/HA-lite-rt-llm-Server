@@ -9,7 +9,7 @@ Home Assistant Add-on Repository. Each top-level directory (except `.github/`,
 via the "Custom Repository" URL — `repository.yaml` is the manifest HA reads.
 
 Distribution is via the public Github repo
-`https://github.com/dariusffm/HA-lite-rt-lm` (the Supervisor builds the image
+`https://github.com/dariusffm/HA-lite-rt-llm-Server` (the Supervisor builds the image
 on the HA host). GHCR pre-built images are the planned next phase; the layout
 is already compatible.
 
