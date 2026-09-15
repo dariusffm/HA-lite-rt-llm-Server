@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1 — 2026-09-15
+
+- Fix `/api/pull` failing with `FileNotFoundError` on Linux: the HuggingFace
+  snapshot symlink was hardlinked instead of the blob it points to
+  (CPython issue 37612). The source path is now resolved before linking.
+- Repository metadata points to the public Github repo; MIT license added.
+
 ## 0.1.0 — 2026-05-17
 
 - Initial release.

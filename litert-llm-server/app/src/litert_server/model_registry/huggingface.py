@@ -67,9 +67,13 @@ MODEL_CATALOG: dict[str, CatalogEntry] = {
 def _link_or_copy(src: str, dst: Path) -> None:
     """Materialize ``dst`` from ``src``. Tries a hardlink first (zero-copy
     on the same filesystem) and falls back to a full copy across mounts.
+
+    ``src`` is resolved first: hf_hub_download returns a relative symlink
+    (snapshots/ -> blobs/), and Linux ``link(2)`` would hardlink the symlink
+    itself, leaving a dangling link in the models dir.
     """
     try:
-        os.link(src, dst)
+        os.link(os.path.realpath(src), dst)
     except OSError:
         shutil.copyfile(src, dst)
 
