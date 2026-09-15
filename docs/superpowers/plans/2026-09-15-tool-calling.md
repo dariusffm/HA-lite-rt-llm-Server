@@ -132,7 +132,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: the exact chunk shape used by `_extract_tool_calls` in Task 5 and the history format accepted by `create_conversation`.
 
-- [ ] **Step 1: Write the probe script**
+- [x] **Step 1: Write the probe script**
 
 ```python
 # tool_spike.py — throwaway
@@ -182,7 +182,7 @@ for chunk in conv.send_message_async(final):
 conv.close()
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `cd litert-llm-server/app && uv run python /path/to/tool_spike.py 2>&1 | tail -60`
 
@@ -191,7 +191,7 @@ Record from the output:
 2. Does any text chunk precede the tool call in the same turn?
 3. In section C, does the model produce a natural-language answer using `21` / `sunny`? If it raises, note the exact error — then try the assistant history entry with `"content": [{"type": "tool_call", ...}]` mirroring section A's shape and record which one works.
 
-- [ ] **Step 3: Write the findings file**
+- [x] **Step 3: Write the findings file**
 
 Create `docs/benchmarks/2026-09-15-tool-call-format-spike.md`:
 
@@ -217,7 +217,7 @@ Create `docs/benchmarks/2026-09-15-tool-call-format-spike.md`:
 <one line per finding that changes `_extract_tool_calls` / `_turn_to_litert`>
 ```
 
-- [ ] **Step 4: Commit the findings only**
+- [x] **Step 4: Commit the findings only**
 
 ```bash
 cd ../..
