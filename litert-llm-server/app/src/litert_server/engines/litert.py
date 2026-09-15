@@ -180,8 +180,9 @@ def _extract_tool_calls(chunk: Mapping[str, Any]) -> list[ToolCall] | None:
 class LiteRTEngine:
     """Single-slot LiteRT-LM engine."""
 
-    def __init__(self, *, models_dir: Path) -> None:
+    def __init__(self, *, models_dir: Path, max_num_tokens: int = 8192) -> None:
         self.models_dir = models_dir
+        self.max_num_tokens = max_num_tokens
         self._lock = Lock()
         self.current_model: str | None = None
         self._engine: Any | None = None
@@ -198,7 +199,9 @@ class LiteRTEngine:
                 raise FileNotFoundError(f"Model file not found: {file}")
             if self._engine is not None:
                 self._engine.close()
-            self._engine = Engine(model_path=str(file), backend=Backend.CPU)
+            self._engine = Engine(
+                model_path=str(file), backend=Backend.CPU, max_num_tokens=self.max_num_tokens
+            )
             self.current_model = model_name
 
     def _build_sampler(self, params: GenerationParams) -> SamplerConfig:

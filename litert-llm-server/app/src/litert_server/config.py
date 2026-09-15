@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     port: int = 8080
     preload_models: list[str] = []
     tool_calling: bool = True
+    context_length: int = 8192
     hf_token: str | None = Field(default=None, validation_alias="HF_TOKEN")
 
     @field_validator("preload_models", mode="before")

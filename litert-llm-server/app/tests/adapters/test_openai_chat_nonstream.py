@@ -31,3 +31,18 @@ async def test_chat_completion_non_streaming(
     assert any(m.content == "Hi" for m in call.messages)
     assert call.params.max_tokens == 50
     assert call.params.temperature == 0.5
+
+
+async def test_chat_completion_non_streaming_engine_error(
+    client: AsyncClient, fake_engine: FakeEngine
+):
+    fake_engine.raise_error = RuntimeError("boom")
+    payload = {
+        "model": "gemma-4-e2b",
+        "messages": [{"role": "user", "content": "Hi"}],
+        "max_tokens": 50,
+        "stream": False,
+    }
+    r = await client.post("/v1/chat/completions", json=payload)
+    assert r.status_code == 500
+    assert r.json() == {"error": {"message": "boom", "type": "server_error"}}

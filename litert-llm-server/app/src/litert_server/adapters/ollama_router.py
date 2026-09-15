@@ -7,12 +7,13 @@ Imports only `domain.*`. Translates between HTTP/JSON/NDJSON and the
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from litert_server.domain.inference import (
@@ -157,6 +158,9 @@ def _nd(obj: dict[str, Any]) -> str:
     return json.dumps(obj) + "\n"
 
 
+log = logging.getLogger("litert_server")
+
+
 def build_ollama_router(
     *,
     engine: InferenceService,
@@ -185,7 +189,7 @@ def build_ollama_router(
     @router.post("/chat", response_model=None)
     async def chat(
         req: OllamaChatRequest,
-    ) -> StreamingResponse | dict[str, Any]:
+    ) -> StreamingResponse | dict[str, Any] | JSONResponse:
         params = _params_from_ollama_options(req.options)
         turns = _to_chat_turns(req.messages)
         tools = _to_tool_specs(req.tools) if tools_enabled else None
@@ -204,20 +208,25 @@ def build_ollama_router(
 
         async def emit() -> AsyncIterator[str]:
             finish: str | None = None
-            async for tok in engine.stream_chat(req.model, turns, params, tools):
-                if tok.tool_calls:
-                    yield record(
-                        {
-                            "role": "assistant",
-                            "content": "",
-                            "tool_calls": _tool_calls_wire(tok.tool_calls),
-                        },
-                        done=False,
-                    )
-                elif tok.text:
-                    yield record({"role": "assistant", "content": tok.text}, done=False)
-                if tok.finish_reason is not None:
-                    finish = tok.finish_reason
+            try:
+                async for tok in engine.stream_chat(req.model, turns, params, tools):
+                    if tok.tool_calls:
+                        yield record(
+                            {
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": _tool_calls_wire(tok.tool_calls),
+                            },
+                            done=False,
+                        )
+                    elif tok.text:
+                        yield record({"role": "assistant", "content": tok.text}, done=False)
+                    if tok.finish_reason is not None:
+                        finish = tok.finish_reason
+            except Exception as exc:
+                log.exception("engine error")
+                yield _nd({"error": str(exc)})
+                return
             # Ollama has no "tool_calls" done_reason; HA only reads `done`.
             yield record(
                 {"role": "assistant", "content": ""},
@@ -228,7 +237,11 @@ def build_ollama_router(
         if req.stream:
             return StreamingResponse(emit(), media_type="application/x-ndjson")
 
-        text, finish, calls = await collect_chat(engine, req.model, turns, params, tools)
+        try:
+            text, finish, calls = await collect_chat(engine, req.model, turns, params, tools)
+        except Exception as exc:
+            log.exception("engine error")
+            return JSONResponse(status_code=500, content={"error": str(exc)})
         message: dict[str, Any] = {"role": "assistant", "content": text}
         if calls:
             message["tool_calls"] = _tool_calls_wire(calls)

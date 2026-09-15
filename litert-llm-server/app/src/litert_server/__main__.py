@@ -68,5 +68,6 @@ def make_production_app() -> FastAPI:
     settings = Settings()
     cache = FilesystemCache(root=settings.models_dir)
     registry = HuggingFaceRegistry(cache=cache, hf_token=settings.hf_token)
-    engine = LiteRTEngine(models_dir=settings.models_dir)
+    engine = LiteRTEngine(models_dir=settings.models_dir, max_num_tokens=settings.context_length)
+    log.info("context length: %d", settings.context_length)
     return build_app(engine=engine, registry=registry, tools_enabled=settings.tool_calling)

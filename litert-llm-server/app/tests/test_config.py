@@ -55,3 +55,13 @@ def test_tool_calling_defaults_true(monkeypatch):
     from litert_server.config import Settings
 
     assert Settings().tool_calling is True
+
+
+def test_context_length_env(monkeypatch):
+    monkeypatch.setenv("LITERT_CONTEXT_LENGTH", "16384")
+    assert Settings().context_length == 16384
+
+
+def test_context_length_defaults(monkeypatch):
+    monkeypatch.delenv("LITERT_CONTEXT_LENGTH", raising=False)
+    assert Settings().context_length == 8192

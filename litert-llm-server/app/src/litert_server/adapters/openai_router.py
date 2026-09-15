@@ -7,13 +7,14 @@ Imports only `domain.*`. Translates between HTTP/JSON/SSE and the
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any, Literal
 
 from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from litert_server.domain.inference import (
@@ -174,6 +175,9 @@ def _tool_calls_wire(calls: list[ToolCall], *, with_index: bool) -> list[dict[st
     return out
 
 
+log = logging.getLogger("litert_server")
+
+
 def _gen_params(req: ChatCompletionRequest | CompletionRequest) -> GenerationParams:
     return GenerationParams(
         max_tokens=req.max_tokens,
@@ -202,7 +206,7 @@ def build_openai_router(
     @router.post("/chat/completions", response_model=None)
     async def chat_completions(
         req: ChatCompletionRequest,
-    ) -> StreamingResponse | ChatCompletionResponse:
+    ) -> StreamingResponse | ChatCompletionResponse | JSONResponse:
         params = _gen_params(req)
         turns = _to_chat_turns(req.messages)
         tools = _to_tool_specs(req) if tools_enabled else None
@@ -226,13 +230,22 @@ def build_openai_router(
             yield frame({"role": "assistant"})
 
             finish_reason: str | None = None
-            async for tok in engine.stream_chat(req.model, turns, params, tools):
-                if tok.tool_calls:
-                    yield frame({"tool_calls": _tool_calls_wire(tok.tool_calls, with_index=True)})
-                elif tok.text:
-                    yield frame({"content": tok.text}, finish=None)
-                if tok.finish_reason is not None:
-                    finish_reason = tok.finish_reason
+            try:
+                async for tok in engine.stream_chat(req.model, turns, params, tools):
+                    if tok.tool_calls:
+                        yield frame(
+                            {"tool_calls": _tool_calls_wire(tok.tool_calls, with_index=True)}
+                        )
+                    elif tok.text:
+                        yield frame({"content": tok.text}, finish=None)
+                    if tok.finish_reason is not None:
+                        finish_reason = tok.finish_reason
+            except Exception as exc:
+                log.exception("engine error")
+                error = {"error": {"message": str(exc), "type": "server_error"}}
+                yield f"data: {json.dumps(error)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
 
             yield frame({}, finish=finish_reason or "stop")
             yield "data: [DONE]\n\n"
@@ -240,7 +253,14 @@ def build_openai_router(
         if req.stream:
             return StreamingResponse(sse_stream(), media_type="text/event-stream")
 
-        text, finish, calls = await collect_chat(engine, req.model, turns, params, tools)
+        try:
+            text, finish, calls = await collect_chat(engine, req.model, turns, params, tools)
+        except Exception as exc:
+            log.exception("engine error")
+            return JSONResponse(
+                status_code=500,
+                content={"error": {"message": str(exc), "type": "server_error"}},
+            )
         message = ChatMessage(
             role="assistant",
             content=text if not calls else None,
