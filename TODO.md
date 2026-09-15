@@ -43,7 +43,7 @@ Fall 2 — selbstständig in Automationen (Node-RED), eigene Phase mit Spec:
 - [ ] `config.yaml` `log_level` erlaubt `critical`, `config.py` `LogLevel` kennt `notice`/`fatal` statt `critical` → Auswahl `critical` in HA schlägt beim Start fehl; Werte angleichen (vorbestehend)
 - [ ] `engines/litert.py`: Producer-Thread kann bei vollem Queue und abgebrochenem Client in `q.put` hängen (cancel bricht nur den Decode ab) → `put(timeout=…)` + "consumer gone"-Flag; drei `except Exception: pass` um close()/cancel() ohne Log (vorbestehend)
 - [ ] `/v1/completions` ignoriert `stream: true` und antwortet immer non-stream (vorbestehend)
-- [ ] Ollama `options.num_ctx` wird ignoriert; Warnung im Log, wenn ein Client mehr Kontext anfragt als `context_length` (Beobachtbarkeit, aus dem Simplify-Pass vertagt)
+- [ ] Ollama `options.num_ctx` wird ignoriert (HA-Agent steht jetzt auf 16384 wie `context_length`); Warnung im Log, wenn ein Client mehr Kontext anfragt als `context_length` (Beobachtbarkeit, aus dem Simplify-Pass vertagt)
 - [ ] `FakeEngine` hat drei Schalter (`tool_calls`, `raise_error`, `raise_after`) mit impliziter Priorität; beim nächsten Umbau auf ein einzelnes Skript `list[Token | Exception]` umstellen
 - [ ] Modell-Katalog erweitern (Kandidaten mit Repo/Datei in `litert-llm-server/DOCS.md` → "Model Landscape"): zuerst `qwen3-0.6b` (klein, Apache-2.0) und `functiongemma-270m` (reines Tool-Routing), optional `gemma-4-12b` für starke Hosts
 - [ ] Wetter im HA-Chat: Wetter-Entität (z. B. Met.no) für den Assist-Agenten freigeben; HA Core bringt ein natives Wettervorhersage-Werkzeug mit (kein Internet-Tool nötig); testen

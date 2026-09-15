@@ -51,6 +51,13 @@ executes tools itself; Home Assistant offers them and runs them:
   the search tool; Home Assistant performs the request and feeds the result
   back.
 
+Home Assistant resends the whole conversation history with every message,
+and Assist tool results (e.g. a `GetLiveContext` device list) are large. If
+the add-on log shows `Input token ids are too long`, either raise
+`context_length` (16384 worked on a host with ~4 GB free RAM) or lower the
+agent option *Max. Nachrichten im Verlauf* (e.g. 6) so the history stays
+bounded. Starting a new chat also resets the history.
+
 Set `tool_calling: false` to ignore all tools: replies are plain text as in
 0.1.x, even if the agent has Assist or MCP tools enabled.
 
