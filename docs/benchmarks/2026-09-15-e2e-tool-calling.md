@@ -11,7 +11,7 @@
 - `/api/chat` returned `tool_calls` for the weather prompt (single tool, from the Mac): **yes**
 - Tool-result round trip produced a sensible answer: **yes** — "The weather in Frankfurt right now is 21°C and sunny."
 - HA Assist read access via the agent: **yes** — "Welche Lichter sind gerade eingeschaltet?" → model called `GetLiveContext`, HA returned the exposed light states, model answered with the two lights that are on (one by Zigbee id, one by name).
-- HA Assist device control ("Schalte … ein"): **not run yet** — needs the user to name a device that is safe to toggle.
+- HA Assist device control ("Schalte WohnzimmerFensterKette ein."): **tool path proven, switch not completed** — the model issued `HassTurnOn` with `domain: ["light"], name: "WohnzimmerFensterKette"`; HA's intent handler answered `MatchFailedError` (reason `NAME`): no exposed entity with that name (the exposed list from `GetLiveContext` contains e.g. "Wohnzimmer-Fenster-Lampe" (unavailable) and "Wohnzimmer LED" (off)). The add-on side (tools → tool_call → tool result → answer) behaved correctly; the failure is HA-side entity exposure/naming. Re-run once the entity is exposed or renamed.
 - MCP web search: **not run** — no web-search MCP server deployed yet (user decision, see TODO.md).
 
 ## Bugs found only in the real environment
