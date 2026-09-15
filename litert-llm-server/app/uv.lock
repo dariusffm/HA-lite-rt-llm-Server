@@ -393,13 +393,15 @@ wheels = [
 
 [[package]]
 name = "litert-lm-api"
-version = "0.11.0"
+version = "0.17.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/87/ff/2ab25cb1bdd4ebcf20f1f4524e51c54e9f498e0775fa417b2a4bf33f37e6/litert_lm_api-0.11.0-py3-none-macosx_12_0_arm64.whl", hash = "sha256:5ae4a1e6b972fc1c058e18470d7e8a84ff489a14e7916e26d98c07059c8143e5", size = 19992301, upload-time = "2026-05-04T22:23:04.636Z" },
-    { url = "https://files.pythonhosted.org/packages/2e/7c/3350b17e6d1e333d066455be03fd605aadbe460598d2b77089a099fbd2bd/litert_lm_api-0.11.0-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:afbc8bee6370a07d5d39461d299bb50b25d08d43dd71897e961fcfaf1f8635cb", size = 42069370, upload-time = "2026-05-04T22:23:10.828Z" },
-    { url = "https://files.pythonhosted.org/packages/0b/e0/468888d42e55dfcd14874d6673b61d6e23bc78b4cbfaf7a6d870945f04e5/litert_lm_api-0.11.0-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:1e58702a5e81636007fa19044fe0c6973277b1cbd4f713fe6d22df43b3baa7f8", size = 44421883, upload-time = "2026-05-04T22:23:00.606Z" },
-    { url = "https://files.pythonhosted.org/packages/4a/36/2dfc16e3e69b72ce756d4b6f03930ecd53dcfc53f9017a6d80dff4e8e494/litert_lm_api-0.11.0-py3-none-win_amd64.whl", hash = "sha256:6de60b246c089d0229d5a8e4d8e889efb527adb7cce958c68ead32427cdd1e13", size = 24070847, upload-time = "2026-05-04T22:22:55.061Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/1d/1508400668b1c17d883ba0d7257b5a68bbfc8ccaa2d897544fb6502ca0f7/litert_lm_api-0.17.0-py3-none-android_23_arm64_v8a.whl", hash = "sha256:91fdf62721a624a6b91c04228021c6781b1383e7142087deb9fe51acf40df9a1", size = 13970245, upload-time = "2026-09-04T22:14:53.525Z" },
+    { url = "https://files.pythonhosted.org/packages/17/5e/f599f115c3535b3f2bf02b64eca0b10e1168832b712734e3dbcae70ec668/litert_lm_api-0.17.0-py3-none-android_23_x86_64.whl", hash = "sha256:31856b701c550174b588e181df9a803439345427489443fe1441e23b2ac48a4f", size = 15082465, upload-time = "2026-09-04T22:14:56.006Z" },
+    { url = "https://files.pythonhosted.org/packages/37/f6/82e908e1ebea675ed615f134ff489b046d066fe8e6ead6bf829166af51a4/litert_lm_api-0.17.0-py3-none-macosx_12_0_arm64.whl", hash = "sha256:d8dd7806c2cb27967aeee53ff560bcf1e49a2d5b6522a9d6ab4c130c13a99691", size = 22353246, upload-time = "2026-09-04T22:14:58.574Z" },
+    { url = "https://files.pythonhosted.org/packages/b6/63/f5d575f2c88f44a039c19ff915ec25c7ec4b1b46e5ee28407d4c1392a50f/litert_lm_api-0.17.0-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:53d41afdad29fd4940e65e8fc252e2b235f943367f818e3811ae7d5adcd60771", size = 46443510, upload-time = "2026-09-04T22:15:02.433Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/b5/52cdeda2ed557ce96dd1c627c25177eca3e31fe3219ae7f4ec5f28a1d777/litert_lm_api-0.17.0-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:654efe7dd6870335b3cfabe57debc9ef13beece16e4981a71c964d3a212fb724", size = 47230964, upload-time = "2026-09-04T22:15:06.254Z" },
+    { url = "https://files.pythonhosted.org/packages/46/09/fab014fe4394a3f1d21e30622fbd4add89b69b0688382bc93aeedde007f2/litert_lm_api-0.17.0-py3-none-win_amd64.whl", hash = "sha256:3ff68755e500eb8f046dd29b117f0e024f22cf7591569cd61903ca734e7873b7", size = 26100718, upload-time = "2026-09-04T22:15:09.304Z" },
 ]
 
 [[package]]
@@ -432,7 +434,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "huggingface-hub", specifier = ">=0.26" },
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.1" },
-    { name = "litert-lm-api", specifier = ">=0.11.0" },
+    { name = "litert-lm-api", specifier = ">=0.17.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },

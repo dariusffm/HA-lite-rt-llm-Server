@@ -10,7 +10,7 @@ dependencies = [
     "pydantic-settings>=2.6",
     "httpx>=0.27",
     "huggingface-hub>=0.26",
-    "litert-lm-api>=0.11.0",
+    "litert-lm-api>=0.17.0",
 ]
 
 [project.optional-dependencies]

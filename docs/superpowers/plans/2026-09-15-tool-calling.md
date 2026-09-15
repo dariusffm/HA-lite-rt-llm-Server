@@ -57,7 +57,7 @@
 - Consumes: nothing.
 - Produces: the installed library version every later task runs against.
 
-- [ ] **Step 1: Raise the floor and re-lock**
+- [x] **Step 1: Raise the floor and re-lock**
 
 Edit `app/pyproject.toml`: replace `"litert-lm-api>=0.11.0",` with `"litert-lm-api>=0.17.0",`.
 
@@ -70,7 +70,7 @@ uv run python -c "import importlib.metadata as m; print(m.version('litert-lm-api
 ```
 Expected: prints `0.17.0`.
 
-- [ ] **Step 2: Confirm the API surface the plan relies on still exists**
+- [x] **Step 2: Confirm the API surface the plan relies on still exists**
 
 Run:
 ```bash
@@ -85,7 +85,7 @@ EOF
 ```
 Expected: `ok: [...]` containing `tools` and `automatic_tool_calling`. If the assertion fails, STOP and report — the spec's engine mechanics need re-evaluation.
 
-- [ ] **Step 3: Run the full suite and a local inference smoke**
+- [x] **Step 3: Run the full suite and a local inference smoke**
 
 Run: `uv run pytest -q && uv run mypy src/`
 Expected: all tests pass, mypy clean.
@@ -108,7 +108,7 @@ EOF
 ```
 Expected: a short greeting is printed, no exception.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd ../..
