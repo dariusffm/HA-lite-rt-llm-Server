@@ -261,3 +261,12 @@ E2E-Test sichtbar, nicht in Unit-Tests (siehe E2E-Bericht 0.1.1–0.1.3).
 - **Tool-Whitelist / Laufzeit-Umschaltung.** Kein Bedarf, HA steuert das Angebot.
 - **Eigenes `tool_calls`-Format in `done_reason` (Ollama).** HA liest nur
   `done`; Abweichung vom Ollama-Wire-Format brächte nichts.
+
+## 12. Abweichungen bei der Umsetzung
+
+- Tool-Call-Ids werden von der Engine über `domain.new_tool_call_id`
+  vergeben, nicht vom Adapter.
+- `coerce_tool_arguments` liegt in `domain/`, da sowohl Engine als auch
+  OpenAI-Adapter es brauchen und keins der beiden das andere importieren darf.
+- Die Option `context_length` (Default 8192) sowie Stream-Fehlerdatensätze
+  wurden nach dem E2E-Fehlschlag ergänzt (0.2.1).

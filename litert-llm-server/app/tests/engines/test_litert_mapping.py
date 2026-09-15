@@ -71,3 +71,24 @@ def test_extract_from_content_item_tool_call_with_string_arguments():
 def test_extract_returns_none_for_text_chunk():
     chunk = {"role": "assistant", "content": [{"type": "text", "text": "hi"}]}
     assert _extract_tool_calls(chunk) is None
+
+
+def test_extract_returns_none_for_empty_tool_calls_list():
+    assert _extract_tool_calls({"tool_calls": []}) is None
+
+
+def test_extract_skips_entry_with_empty_name():
+    chunk = {
+        "tool_calls": [
+            {"function": {"name": "", "arguments": {}}},
+            {"function": {"name": "get_weather", "arguments": {"city": "Frankfurt"}}},
+        ]
+    }
+    calls = _extract_tool_calls(chunk)
+    assert calls is not None and len(calls) == 1
+    assert calls[0].name == "get_weather"
+
+
+def test_extract_returns_none_when_all_entries_skipped():
+    chunk = {"tool_calls": [{"function": {"name": "", "arguments": {}}}]}
+    assert _extract_tool_calls(chunk) is None

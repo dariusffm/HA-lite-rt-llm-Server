@@ -30,6 +30,9 @@ class InferenceService(Protocol):
       tools — optional function schemas the client offers; engines that support
       tool calling yield exactly one Token(tool_calls=...) with finish_reason="tool_calls"
       instead of text when the model calls a tool.
+
+    Engines mint a non-empty `ToolCall.id` (`call_<hex>`); adapters pass ids
+    through unchanged.
     """
 
     def stream_completion(

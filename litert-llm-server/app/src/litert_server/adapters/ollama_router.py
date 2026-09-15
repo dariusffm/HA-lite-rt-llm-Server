@@ -62,7 +62,7 @@ class OllamaToolCall(BaseModel):
 
 class OllamaChatMessage(BaseModel):
     role: Literal["system", "user", "assistant", "tool"]
-    content: str = ""
+    content: str | None = ""
     tool_calls: list[OllamaToolCall] | None = None
     tool_name: str | None = None
 
@@ -134,13 +134,13 @@ def _to_chat_turns(messages: list[OllamaChatMessage]) -> list[ChatTurn]:
                 for tc in m.tool_calls
             ]
             pending = list(calls)
-            turns.append(ChatTurn(role="assistant", content=m.content, tool_calls=calls))
+            turns.append(ChatTurn(role="assistant", content=m.content or "", tool_calls=calls))
         elif m.role == "tool":
             name = m.tool_name or (pending.pop(0).name if pending else None)
-            turns.append(ChatTurn(role="tool", content=m.content, tool_name=name))
+            turns.append(ChatTurn(role="tool", content=m.content or "", tool_name=name))
         else:
             pending = []
-            turns.append(ChatTurn(role=m.role, content=m.content))
+            turns.append(ChatTurn(role=m.role, content=m.content or ""))
     return turns
 
 

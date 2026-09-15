@@ -23,7 +23,10 @@ def new_tool_call_id() -> str:
 
 def coerce_tool_arguments(raw: Any) -> dict[str, Any]:
     """Best-effort dict from a tool-arguments payload: dict passthrough,
-    JSON string parsed, anything else (or malformed JSON) → {}."""
+    JSON string parsed, anything else (or malformed JSON) → {}.
+
+    Lives in domain/ (spec §5.3 deviation) because both the engine and the
+    OpenAI adapter need it and neither may import the other."""
     if isinstance(raw, dict):
         return raw
     if isinstance(raw, str) and raw.strip():

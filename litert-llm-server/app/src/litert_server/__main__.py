@@ -59,7 +59,6 @@ def build_app(
     app.include_router(build_ollama_router(
         engine=engine, registry=registry, tools_enabled=tools_enabled
     ))
-    log.info("tool calling: %s", "enabled" if tools_enabled else "disabled")
     return app
 
 
@@ -70,4 +69,11 @@ def make_production_app() -> FastAPI:
     registry = HuggingFaceRegistry(cache=cache, hf_token=settings.hf_token)
     engine = LiteRTEngine(models_dir=settings.models_dir, max_num_tokens=settings.context_length)
     log.info("context length: %d", settings.context_length)
+    if settings.max_tokens > settings.context_length:
+        log.warning(
+            "max_tokens (%d) exceeds context_length (%d); requests may fail",
+            settings.max_tokens,
+            settings.context_length,
+        )
+    log.info("tool calling: %s", "enabled" if settings.tool_calling else "disabled")
     return build_app(engine=engine, registry=registry, tools_enabled=settings.tool_calling)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import queue
 from collections.abc import AsyncIterator, Callable, Mapping
 from pathlib import Path
@@ -21,6 +22,8 @@ from litert_server.domain.types import (
     coerce_tool_arguments,
     new_tool_call_id,
 )
+
+log = logging.getLogger(__name__)
 
 _SENTINEL: Any = object()
 
@@ -159,6 +162,7 @@ def _extract_tool_calls(chunk: Mapping[str, Any]) -> list[ToolCall] | None:
         fn = maybe_fn if isinstance(maybe_fn, dict) else raw
         name = fn.get("name", "")
         if not isinstance(name, str) or not name:
+            log.warning("dropping tool call without name: %r", raw)
             continue
         raw_id = raw.get("id")
         call_id = raw_id if isinstance(raw_id, str) and raw_id else new_tool_call_id()

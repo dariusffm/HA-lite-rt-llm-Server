@@ -49,3 +49,18 @@ async def test_generate_non_streaming_engine_error(
     )
     assert r.status_code == 500
     assert r.json() == {"error": "boom"}
+
+
+async def test_generate_streams_error_record_mid_stream(
+    ollama_client: AsyncClient, fake_engine: FakeEngine
+):
+    fake_engine.raise_error = RuntimeError("boom")
+    fake_engine.raise_after = 2
+    chunks = await post_ndjson(
+        ollama_client,
+        "/api/generate",
+        {"model": "gemma-4-e2b", "prompt": "x", "stream": True},
+    )
+    assert [c["response"] for c in chunks[:2]] == ["Hello", ", "]
+    assert chunks[2] == {"error": "boom"}
+    assert len(chunks) == 3

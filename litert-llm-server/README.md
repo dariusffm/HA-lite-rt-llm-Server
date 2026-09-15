@@ -2,7 +2,7 @@
 
 Local LLM inference via Google LiteRT-LM. Exposes OpenAI- and
 Ollama-compatible HTTP APIs on port 8080, consumable by Home Assistant's
-"OpenAI Conversation" integration and any Ollama-compatible client
+Ollama integration (Assist, tool calling) and any Ollama-compatible client
 (Node-RED nodes, Open WebUI, ...). Supports client-side tool calling (HA
 Assist, MCP tools).
 
@@ -48,8 +48,9 @@ with HTTP 401.
 |---|---|---|
 | `log_level` | `info` | trace, debug, info, notice, warning, error, fatal |
 | `default_model` | `gemma-4-e2b` | Model used when a request omits `model` |
-| `max_tokens` | 1024 | Default upper bound; can be raised up to 32768 (the LiteRT-LM context window) |
+| `max_tokens` | 1024 | Default output token cap per request; must stay below `context_length` |
 | `temperature` | 0.7 | Default sampling temperature |
-| `context_length` | 8192 | Context window (tokens); range 2048-32768 (model supports up to 32k) |
+| `context_length` | 8192 | Engine context window in tokens (2048–32768); prompt + completion must fit |
 | `preload_models` | `[]` | Model names to pull on startup |
+| `tool_calling` | true | Ignore/accept client tool definitions (see DOCS) |
 | `hf_token` | `""` | HuggingFace read token; required only for gated `google/*` models |

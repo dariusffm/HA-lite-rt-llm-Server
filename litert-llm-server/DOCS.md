@@ -29,7 +29,7 @@
 ## Using with Home Assistant
 
 Use the core **Ollama** integration (Settings → Devices & Services → Add
-Integration → Ollama). URL: `http://<addon-hostname>:8080` — the hostname is
+Integration → Ollama). URL: `http://<add-on-hostname>:8080` — the hostname is
 shown on the add-on's Info page (e.g. `83680c0c-litert-llm-server`). Then add
 a **Conversation agent** and pick the model (e.g. `gemma-4-e2b`).
 

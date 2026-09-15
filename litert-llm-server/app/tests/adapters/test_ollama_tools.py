@@ -110,6 +110,24 @@ async def test_explicit_tool_name_wins(fake_engine: FakeEngine):
     assert fake_engine.chat_calls[-1].messages[1].tool_name == "explicit"
 
 
+async def test_assistant_message_with_null_content_maps_to_empty_string(fake_engine: FakeEngine):
+    async with _client(fake_engine) as c:
+        r = await c.post("/api/chat", json={
+            "model": "gemma-4-e2b",
+            "messages": [
+                {"role": "user", "content": "Weather?"},
+                {"role": "assistant", "content": None, "tool_calls": [
+                    {"function": {"name": "get_weather", "arguments": {"city": "Frankfurt"}}}
+                ]},
+            ],
+            "tools": [WEATHER_TOOL],
+            "stream": False,
+        })
+    assert r.status_code == 200
+    turns = fake_engine.chat_calls[-1].messages
+    assert turns[1].role == "assistant" and turns[1].content == ""
+
+
 async def test_tools_ignored_when_disabled(fake_engine: FakeEngine):
     async with _client(fake_engine, tools_enabled=False) as c:
         chunks = await post_ndjson(c, "/api/chat", {
