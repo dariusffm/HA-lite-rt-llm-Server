@@ -256,24 +256,29 @@ def build_ollama_router(
     @router.post("/generate", response_model=None)
     async def generate(
         req: OllamaGenerateRequest,
-    ) -> StreamingResponse | dict[str, Any]:
+    ) -> StreamingResponse | dict[str, Any] | JSONResponse:
         params = _params_from_ollama_options(req.options)
         created_at = datetime.now(UTC).isoformat()
 
         async def emit() -> AsyncIterator[str]:
             finish: str | None = None
-            async for tok in engine.stream_completion(req.model, req.prompt, params):
-                if tok.text:
-                    yield _nd(
-                        {
-                            "model": req.model,
-                            "created_at": created_at,
-                            "response": tok.text,
-                            "done": False,
-                        }
-                    )
-                if tok.finish_reason is not None:
-                    finish = tok.finish_reason
+            try:
+                async for tok in engine.stream_completion(req.model, req.prompt, params):
+                    if tok.text:
+                        yield _nd(
+                            {
+                                "model": req.model,
+                                "created_at": created_at,
+                                "response": tok.text,
+                                "done": False,
+                            }
+                        )
+                    if tok.finish_reason is not None:
+                        finish = tok.finish_reason
+            except Exception as exc:
+                log.exception("engine error")
+                yield _nd({"error": str(exc)})
+                return
             yield _nd(
                 {
                     "model": req.model,
@@ -287,7 +292,11 @@ def build_ollama_router(
         if req.stream:
             return StreamingResponse(emit(), media_type="application/x-ndjson")
 
-        text, finish = await collect_completion(engine, req.model, req.prompt, params)
+        try:
+            text, finish = await collect_completion(engine, req.model, req.prompt, params)
+        except Exception as exc:
+            log.exception("engine error")
+            return JSONResponse(status_code=500, content={"error": str(exc)})
         return {
             "model": req.model,
             "created_at": created_at,

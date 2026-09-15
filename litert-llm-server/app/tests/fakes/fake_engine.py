@@ -43,6 +43,7 @@ class FakeEngine:
     completion_calls: list[FakeEngineCall] = field(default_factory=list)
     chat_calls: list[FakeChatCall] = field(default_factory=list)
     raise_error: Exception | None = None
+    raise_after: int | None = None
 
     # Backwards-compat alias used by older tests.
     @property
@@ -65,6 +66,9 @@ class FakeEngine:
     ) -> AsyncIterator[Token]:
         self.completion_calls.append(FakeEngineCall(model=model, prompt=prompt, params=params))
         if self.raise_error:
+            if self.raise_after is not None:
+                for tok in self._yield_tokens()[: self.raise_after]:
+                    yield tok
             raise self.raise_error
         for tok in self._yield_tokens():
             yield tok
@@ -80,6 +84,9 @@ class FakeEngine:
             FakeChatCall(model=model, messages=list(messages), params=params, tools=tools)
         )
         if self.raise_error:
+            if self.raise_after is not None:
+                for tok in self._yield_tokens()[: self.raise_after]:
+                    yield tok
             raise self.raise_error
         # Mirrors reality: no tools offered -> the model cannot call one.
         if self.tool_calls and tools is not None:

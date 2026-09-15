@@ -6,8 +6,12 @@
   through to `litert_lm.Engine` as `max_num_tokens`. Fixes Home Assistant
   Assist prompts exceeding the previous hardcoded 4096-token library
   default.
-- Streaming errors from the engine are now returned as clean Ollama/OpenAI
-  error records instead of dropping the connection mid-response.
+- Engine errors during `/api/chat`, `/api/generate` and `/v1/chat/completions`
+  streaming are now returned as a clean Ollama/OpenAI error record instead of
+  dropping the connection mid-response. Non-streaming engine errors on those
+  three endpoints, plus `/v1/completions` (which has no streaming branch),
+  now return HTTP 500 with a JSON error body instead of an unhandled
+  traceback response.
 
 ## 0.2.0 — 2026-09-15
 

@@ -60,3 +60,31 @@ async def test_chat_completion_streaming_engine_error(
     error_payloads = [json.loads(e) for e in events if e != "[DONE]" and "error" in e]
     assert len(error_payloads) == 1
     assert error_payloads[0]["error"] == {"message": "boom", "type": "server_error"}
+
+
+async def test_chat_completion_streaming_partial_output_then_error(
+    client: AsyncClient, fake_engine: FakeEngine
+):
+    fake_engine.raise_error = RuntimeError("boom")
+    fake_engine.raise_after = 2
+    payload = {
+        "model": "gemma-4-e2b",
+        "messages": [{"role": "user", "content": "Hi"}],
+        "max_tokens": 50,
+        "stream": True,
+    }
+    async with client.stream("POST", "/v1/chat/completions", json=payload) as r:
+        assert r.status_code == 200
+        events: list[str] = []
+        async for line in r.aiter_lines():
+            if not line.startswith("data: "):
+                continue
+            events.append(line.removeprefix("data: ").strip())
+
+    assert events[-1] == "[DONE]"
+    parsed = [json.loads(e) for e in events[:-1]]
+    assert parsed[0]["choices"][0]["delta"].get("role") == "assistant"
+    assert parsed[1]["choices"][0]["delta"].get("content") == "Hello"
+    assert parsed[2]["choices"][0]["delta"].get("content") == ", "
+    assert parsed[3]["error"] == {"message": "boom", "type": "server_error"}
+    assert len(parsed) == 4

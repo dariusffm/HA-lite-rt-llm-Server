@@ -75,3 +75,23 @@ async def test_chat_non_streaming_engine_error(
     )
     assert r.status_code == 500
     assert r.json() == {"error": "boom"}
+
+
+async def test_chat_streams_partial_output_then_error_record(
+    ollama_client: AsyncClient, fake_engine: FakeEngine
+):
+    fake_engine.raise_error = RuntimeError("boom")
+    fake_engine.raise_after = 2
+    chunks = await post_ndjson(
+        ollama_client,
+        "/api/chat",
+        {
+            "model": "gemma-4-e2b",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "stream": True,
+        },
+    )
+    assert len(chunks) == 3
+    assert chunks[0]["message"]["content"] == "Hello"
+    assert chunks[1]["message"]["content"] == ", "
+    assert chunks[2] == {"error": "boom"}

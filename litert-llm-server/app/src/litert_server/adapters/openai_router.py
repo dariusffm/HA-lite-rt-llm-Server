@@ -278,10 +278,17 @@ def build_openai_router(
             choices=[ChatCompletionChoice(index=0, message=message, finish_reason=finish)],
         )
 
-    @router.post("/completions", response_model=CompletionResponse)
-    async def completions(req: CompletionRequest) -> CompletionResponse:
+    @router.post("/completions", response_model=None)
+    async def completions(req: CompletionRequest) -> CompletionResponse | JSONResponse:
         params = _gen_params(req)
-        text, finish = await collect_completion(engine, req.model, req.prompt, params)
+        try:
+            text, finish = await collect_completion(engine, req.model, req.prompt, params)
+        except Exception as exc:
+            log.exception("engine error")
+            return JSONResponse(
+                status_code=500,
+                content={"error": {"message": str(exc), "type": "server_error"}},
+            )
         return CompletionResponse(
             id=f"cmpl-{uuid.uuid4().hex}",
             created=int(time.time()),
