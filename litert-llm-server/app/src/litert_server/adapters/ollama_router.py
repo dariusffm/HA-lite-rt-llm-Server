@@ -21,7 +21,7 @@ from litert_server.domain.inference import (
     collect_completion,
 )
 from litert_server.domain.model_registry import ModelRegistry
-from litert_server.domain.types import ChatTurn, GenerationParams
+from litert_server.domain.types import ChatTurn, GenerationParams, ToolCall, ToolSpec
 
 
 class OllamaModelDetails(BaseModel):
@@ -44,9 +44,31 @@ class OllamaTagsResponse(BaseModel):
     models: list[OllamaModelItem]
 
 
+class OllamaFunctionCall(BaseModel):
+    name: str
+    arguments: dict[str, Any] = {}
+
+
+class OllamaToolCall(BaseModel):
+    function: OllamaFunctionCall
+
+
 class OllamaChatMessage(BaseModel):
-    role: Literal["system", "user", "assistant"]
-    content: str
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str = ""
+    tool_calls: list[OllamaToolCall] | None = None
+    tool_name: str | None = None
+
+
+class OllamaFunctionSpec(BaseModel):
+    name: str
+    description: str = ""
+    parameters: dict[str, Any] = {"type": "object", "properties": {}}
+
+
+class OllamaToolSpec(BaseModel):
+    type: Literal["function"] = "function"
+    function: OllamaFunctionSpec
 
 
 class OllamaChatRequest(BaseModel):
@@ -54,6 +76,7 @@ class OllamaChatRequest(BaseModel):
     messages: list[OllamaChatMessage]
     stream: bool = True
     options: dict[str, Any] | None = None
+    tools: list[OllamaToolSpec] | None = None
 
 
 class OllamaGenerateRequest(BaseModel):
@@ -87,7 +110,46 @@ def _params_from_ollama_options(options: dict[str, Any] | None) -> GenerationPar
 
 
 def _to_chat_turns(messages: list[OllamaChatMessage]) -> list[ChatTurn]:
-    return [ChatTurn(role=m.role, content=m.content) for m in messages]
+    """Map wire messages to domain turns.
+
+    Ollama clients (HA included) send tool results without ``tool_name``;
+    the n-th tool result after an assistant turn is matched to that turn's
+    n-th tool call. An explicit ``tool_name`` always wins.
+    """
+    turns: list[ChatTurn] = []
+    pending: list[ToolCall] = []
+    for m in messages:
+        if m.role == "assistant" and m.tool_calls:
+            calls = [
+                ToolCall(id=f"call_{i}", name=tc.function.name, arguments=tc.function.arguments)
+                for i, tc in enumerate(m.tool_calls)
+            ]
+            pending = list(calls)
+            turns.append(ChatTurn(role="assistant", content=m.content, tool_calls=calls))
+        elif m.role == "tool":
+            name = m.tool_name or (pending.pop(0).name if pending else None)
+            turns.append(ChatTurn(role="tool", content=m.content, tool_name=name))
+        else:
+            pending = []
+            turns.append(ChatTurn(role=m.role, content=m.content))
+    return turns
+
+
+def _to_tool_specs(tools: list[OllamaToolSpec] | None) -> list[ToolSpec] | None:
+    if not tools:
+        return None
+    return [
+        ToolSpec(
+            name=t.function.name,
+            description=t.function.description,
+            parameters=t.function.parameters,
+        )
+        for t in tools
+    ]
+
+
+def _tool_calls_wire(calls: list[ToolCall]) -> list[dict[str, Any]]:
+    return [{"function": {"name": c.name, "arguments": c.arguments}} for c in calls]
 
 
 def _nd(obj: dict[str, Any]) -> str:
@@ -99,6 +161,7 @@ def build_ollama_router(
     *,
     engine: InferenceService,
     registry: ModelRegistry,
+    tools_enabled: bool = True,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
@@ -125,42 +188,56 @@ def build_ollama_router(
     ) -> StreamingResponse | dict[str, Any]:
         params = _params_from_ollama_options(req.options)
         turns = _to_chat_turns(req.messages)
+        tools = _to_tool_specs(req.tools) if tools_enabled else None
         created_at = datetime.now(UTC).isoformat()
+
+        def record(message: dict[str, Any], done: bool, done_reason: str | None = None) -> str:
+            rec: dict[str, Any] = {
+                "model": req.model,
+                "created_at": created_at,
+                "message": message,
+                "done": done,
+            }
+            if done:
+                rec["done_reason"] = done_reason or "stop"
+            return _nd(rec)
 
         async def emit() -> AsyncIterator[str]:
             finish: str | None = None
-            async for tok in engine.stream_chat(req.model, turns, params):
-                if tok.text:
-                    yield _nd(
+            async for tok in engine.stream_chat(req.model, turns, params, tools):
+                if tok.tool_calls:
+                    yield record(
                         {
-                            "model": req.model,
-                            "created_at": created_at,
-                            "message": {"role": "assistant", "content": tok.text},
-                            "done": False,
-                        }
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": _tool_calls_wire(tok.tool_calls),
+                        },
+                        done=False,
                     )
+                elif tok.text:
+                    yield record({"role": "assistant", "content": tok.text}, done=False)
                 if tok.finish_reason is not None:
                     finish = tok.finish_reason
-            yield _nd(
-                {
-                    "model": req.model,
-                    "created_at": created_at,
-                    "message": {"role": "assistant", "content": ""},
-                    "done": True,
-                    "done_reason": finish or "stop",
-                }
+            # Ollama has no "tool_calls" done_reason; HA only reads `done`.
+            yield record(
+                {"role": "assistant", "content": ""},
+                done=True,
+                done_reason="stop" if finish != "length" else "length",
             )
 
         if req.stream:
             return StreamingResponse(emit(), media_type="application/x-ndjson")
 
-        text, finish, _ = await collect_chat(engine, req.model, turns, params)
+        text, finish, calls = await collect_chat(engine, req.model, turns, params, tools)
+        message: dict[str, Any] = {"role": "assistant", "content": text}
+        if calls:
+            message["tool_calls"] = _tool_calls_wire(calls)
         return {
             "model": req.model,
             "created_at": created_at,
-            "message": {"role": "assistant", "content": text},
+            "message": message,
             "done": True,
-            "done_reason": finish,
+            "done_reason": "length" if finish == "length" else "stop",
         }
 
     @router.post("/generate", response_model=None)
