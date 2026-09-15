@@ -8,8 +8,10 @@ Home Assistant Add-on Repository. Each top-level directory (except `.github/`,
 `docs/`) is one installable add-on. The repo is consumed by Home Assistant
 via the "Custom Repository" URL — `repository.yaml` is the manifest HA reads.
 
-Distribution is currently **local-only**. Public Github + GHCR pre-built
-images is the planned next phase; the layout is already compatible.
+Distribution is via the public Github repo
+`https://github.com/dariusffm/HA-lite-rt-lm` (the Supervisor builds the image
+on the HA host). GHCR pre-built images are the planned next phase; the layout
+is already compatible.
 
 ## Active Add-ons
 
@@ -105,9 +107,9 @@ docker run --rm -p 8080:8080 \
   local/litert-llm-server:dev
 ```
 
-Installing in a local HA instance for end-to-end testing: add this repo's path
-as a "Local Add-on Repository" via the HA Supervisor UI (Settings → Add-ons →
-Add-on Store → ⋮ → Repositories).
+Installing in a HA instance for end-to-end testing: add the Github URL above
+as a repository via the HA Supervisor UI (Settings → Apps → App Store → ⋮ →
+Repositories; older versions: Settings → Add-ons → Add-on Store).
 
 ## Conventions
 
