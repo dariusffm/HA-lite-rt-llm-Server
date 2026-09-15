@@ -10,15 +10,18 @@ Ollama-compatible HTTP APIs on port 8080, consumable by Home Assistant's
 All models use the LiteRT-LM `.litertlm` format. Context window: up to
 32k tokens (prompt + completion combined).
 
-| Name | Repository | Gated | Approx. Size |
-|---|---|---|---|
-| `gemma-4-e2b` (default) | `litert-community/gemma-4-E2B-it-litert-lm` | no | ~1.5 GB |
-| `gemma-4-e4b` | `litert-community/gemma-4-E4B-it-litert-lm` | no | ~2.8 GB |
-| `gemma-3n-e2b` | `google/gemma-3n-E2B-it-litert-lm` | yes (HF token) | ~1.5 GB |
-| `gemma-3n-e4b` | `google/gemma-3n-E4B-it-litert-lm` | yes (HF token) | ~2.8 GB |
+| Name | Repository | Gated | File Size | Tool calling |
+|---|---|---|---|---|
+| `gemma-4-e2b` (default) | `litert-community/gemma-4-E2B-it-litert-lm` | no | ~2.6 GB | yes |
+| `gemma-4-e4b` | `litert-community/gemma-4-E4B-it-litert-lm` | no | ~3.7 GB | yes |
+| `gemma-3n-e2b` | `google/gemma-3n-E2B-it-litert-lm` | yes (HF token) | ~3.0 GB | not documented |
+| `gemma-3n-e4b` | `google/gemma-3n-E4B-it-litert-lm` | yes (HF token) | ~4.2 GB | not documented |
 
-Models are downloaded on demand via the Ollama-compatible `/api/pull`
-endpoint. See `DOCS.md` for usage.
+Sizes are the actual `.litertlm` files (verified on a live install for
+`gemma-4-e2b`: 2,588,147,712 bytes). Models are downloaded on demand via the
+Ollama-compatible `/api/pull` endpoint. See `DOCS.md` for usage and for the
+list of further `.litertlm` models the runtime can load (Qwen3, Phi-4-mini,
+Gemma 4 12B, FunctionGemma, …) that are not yet in the catalog.
 
 ## Prerequisites — HuggingFace Access (only for gated Gemma 3n models)
 

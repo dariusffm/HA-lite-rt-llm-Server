@@ -31,6 +31,7 @@ Fall 2 — selbstständig in Automationen (Node-RED), eigene Phase mit Spec:
 
 ## Offen daneben
 
+- [ ] Modell-Katalog erweitern (Kandidaten mit Repo/Datei in `litert-llm-server/DOCS.md` → "Model Landscape"): zuerst `qwen3-0.6b` (klein, Apache-2.0) und `functiongemma-270m` (reines Tool-Routing), optional `gemma-4-12b` für starke Hosts
 - [ ] Websuche-MCP-Server für HA auswählen und betreiben (Voraussetzung für Wetter/Nachrichten im HA-Chat)
 - [ ] Vorbestehende Lint-Abweichungen: ruff I001 in `app/tests/fakes/fake_engine.py` (verschwindet mit Task 4), `ruff format` für `config.py`, `domain/*.py`, `huggingface.py` u. a.
 - [ ] FastAPI-`version`-String in `__main__.py` hängt hinter `config.yaml` (wird in Task 8 auf 0.2.0 gesetzt)

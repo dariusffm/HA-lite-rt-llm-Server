@@ -48,6 +48,66 @@ The add-on does not bundle models. Use either:
 
 For gated models, set the `hf_token` option first.
 
+## Model Landscape (verified 2026-09-15, litert-lm-api 0.17.0)
+
+The add-on can only `/api/pull` models listed in its catalog
+(`model_registry/huggingface.py`). The runtime itself loads any `.litertlm`
+file; the tables below show what exists on HuggingFace today so the catalog
+can grow. Sizes come from the HF file listings or Google's LiteRT-LM overview
+table; "Tool calling" means Google documents native function calling.
+
+### In the catalog (pullable now)
+
+| Name | Repo | File | Size | Gated | Context | Tool calling |
+|---|---|---|---|---|---|---|
+| `gemma-4-e2b` | `litert-community/gemma-4-E2B-it-litert-lm` | `gemma-4-E2B-it.litertlm` | 2.6 GB | no | 32k | yes |
+| `gemma-4-e4b` | `litert-community/gemma-4-E4B-it-litert-lm` | `gemma-4-E4B-it.litertlm` | 3.7 GB | no | 32k | yes |
+| `gemma-3n-e2b` | `google/gemma-3n-E2B-it-litert-lm` | `gemma-3n-E2B-it-int4.litertlm` | 3.0 GB | yes | 32k | not documented |
+| `gemma-3n-e4b` | `google/gemma-3n-E4B-it-litert-lm` | `gemma-3n-E4B-it-int4.litertlm` | 4.2 GB | yes | 32k | not documented |
+
+### Available as `.litertlm`, not yet in the catalog (candidates)
+
+| Candidate | Repo | File | Size | Gated | Notes |
+|---|---|---|---|---|---|
+| Gemma 4 12B | `litert-community/gemma-4-12B-it-litert-lm` | `gemma-4-12B-it.litertlm` | 6.9 GB | no | 128k context, multimodal, tool calling; needs LiteRT-LM ≥ 0.17 (we have it). Too large for most HA hosts. |
+| Gemma 3 1B | `litert-community/Gemma3-1B-IT` | `gemma3-1b-it-int4.litertlm` (+ device variants) | ~1.0 GB | yes | Small and fast; no tool calling. |
+| Gemma 3 270M | `litert-community/gemma-3-270m-it` | `gemma3-270m-it-q8.litertlm` | 0.3 GB | yes | Tiny; classification/short replies only. |
+| FunctionGemma 270M (mobile actions) | `litert-community/functiongemma-270m-ft-mobile-actions` | `mobile_actions_q8_ekv1024.litertlm` | ~0.3 GB | yes | Google's dedicated on-device function-calling model; 1k KV cache. Good for pure tool routing, not for chat. |
+| Qwen3 0.6B | `litert-community/Qwen3-0.6B` | `Qwen3-0.6B.litertlm` (+ int4 variants in `Qwen3-0.6B-int4`) | 0.6 GB | no | Apache-2.0; tool calling not documented for the conversion. |
+| Qwen3 4B | `litert-community/Qwen3-4B` | `qwen3_4b_mixed_int4.litertlm` | n/a | no | Apache-2.0. |
+| Qwen2.5 1.5B | `litert-community/Qwen2.5-1.5B-Instruct` | `Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm` | 1.6 GB | no | 4k KV cache. |
+| Phi-4-mini 3.8B | `litert-community/Phi-4-mini-instruct` | `Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.litertlm` | 3.9 GB | no | MIT; 4k KV cache. |
+| Llama 3.2 1B / 3B | `litert-community/Llama-3.2-{1B,3B}-Instruct` | `..._q8_ekv<N>.litertlm` (pattern) | n/a | yes (Meta license, repo not browsable anonymously) | Filenames unverified. |
+| DeepSeek-R1-Distill-Qwen 1.5B | `litert-community/DeepSeek-R1-Distill-Qwen-1.5B` | `DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv4096.litertlm` | n/a | no | Reasoning model; no tool calling. |
+| SmolLM2 135M / 1.7B | `litert-community/SmolLM2-{135M,1.7B}-Instruct` | `SmolLM2_135M_Instruct.litertlm`, `SmolLM2-1_7B-Instruct_dynamic_wi8_afp32.litertlm` | 0.1 / 1.7 GB | no | Apache-2.0. |
+
+Adding a candidate = one `CatalogEntry` (name, repo, filename, quantization,
+gated) in `model_registry/huggingface.py` plus a README row. Files with
+`ekv<N>` in the name have a fixed KV cache of N tokens — that caps the
+usable context regardless of the 32k default.
+
+### Not available as `.litertlm` (as of 2026-09-15)
+
+- Gemma 3 4B (`litert-community/Gemma3-4B-IT`) — only MediaPipe `.task` files.
+- Qwen2.5 0.5B, TinyLlama 1.1B — only `.tflite` / `.task`.
+- SmolLM3 — no LiteRT-LM conversion found.
+- EmbeddingGemma 300M (`litert-community/embeddinggemma-300m`) — `.tflite`
+  only; a community `.litertlm` exists (`kontextdev/embeddinggemma-300m-litertlm`)
+  but is unofficial. Embeddings are out of scope for this add-on anyway.
+
+### Memory
+
+LiteRT-LM publishes no minimum-RAM figures, only measured peak CPU memory
+(≈0.6–3.5 GB depending on model and device). Rule of thumb: free RAM ≥ file
+size + 1 GB. On the test host, `gemma-4-e2b` idles at ~2 % RAM and runs
+with ~27 % CPU during a reply.
+
+### Function calling
+
+Google names two options: **Gemma 4** (E2B/E4B/12B) for agentic chat, and
+**FunctionGemma 270M** for dedicated tool routing. The catalog default
+`gemma-4-e2b` is therefore the right choice for the tool-calling feature.
+
 ## Limits (MVP)
 
 - **Context window: 32k tokens** (prompt + completion combined). Long
