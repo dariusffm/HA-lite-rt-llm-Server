@@ -7,6 +7,8 @@
 - `GET /v1/models`
 - `POST /v1/chat/completions` (stream / non-stream, uses model-native chat template)
 - `POST /v1/completions` (legacy raw prompt completion)
+- `/v1/chat/completions` accepts `tools` / `tool_choice` and returns
+  `tool_calls` with `finish_reason: "tool_calls"`.
 
 ### Ollama-compatible (`/api/*`)
 
@@ -16,6 +18,8 @@
 - `POST /api/pull` (stream progress NDJSON)
 - `POST /api/show`
 - `DELETE /api/delete`
+- `/api/chat` accepts `tools` and returns `message.tool_calls` (client-side
+  tool calling, Ollama wire format).
 
 ### Health
 
@@ -24,15 +28,42 @@
 
 ## Using with Home Assistant
 
-Add an "OpenAI Conversation" integration:
+Use the core **Ollama** integration (Settings → Devices & Services → Add
+Integration → Ollama). URL: `http://<addon-hostname>:8080` — the hostname is
+shown on the add-on's Info page (e.g. `83680c0c-litert-llm-server`). Then add
+a **Conversation agent** and pick the model (e.g. `gemma-4-e2b`).
 
-- **Base URL:** `http://<add-on-hostname>:8080/v1`
-- **API key:** anything (no auth in MVP)
-- **Model:** `gemma-4-e2b`
+*Home Assistant's "OpenAI Conversation" integration has no base-URL option and
+cannot be pointed at this add-on.*
+
+### Tool calling (control your home, web search)
+
+Tool calling is on by default (`tool_calling: true`). The add-on never
+executes tools itself; Home Assistant offers them and runs them:
+
+- **Assist** — tick "Assist" in the conversation agent to let the model see
+  and control exposed entities ("turn on the hallway light").
+- **Web search / news / weather** — install a web-search MCP server (any
+  server speaking Model Context Protocol, e.g. a DuckDuckGo or Brave Search
+  MCP server, run as a container on your network), add it via Settings →
+  Devices & Services → **Model Context Protocol**, then enable that MCP
+  server's tools in the conversation agent's options. The model can then call
+  the search tool; Home Assistant performs the request and feeds the result
+  back.
+
+Set `tool_calling: false` to ignore all tools: replies are plain text as in
+0.1.x, even if the agent has Assist or MCP tools enabled.
+
+Small models (Gemma 4 E2B) sometimes emit malformed tool arguments; Home
+Assistant repairs common cases. Keep the number of exposed entities small to
+save context.
 
 ## Using with Node-RED
 
 Use any Ollama node and point it to `http://<add-on-hostname>:8080`.
+
+Tool calling requires a client that executes tools; Node-RED's Ollama nodes do
+not, so tool results are not fed back there yet.
 
 ## Pulling a Model
 
@@ -115,4 +146,5 @@ Google names two options: **Gemma 4** (E2B/E4B/12B) for agentic chat, and
 - Single-slot engine: switching models mid-flight triggers a reload.
 - No request queue: concurrent requests serialize.
 - No authentication: rely on HA's internal network.
-- Embeddings, function-calling, and multi-modal are not yet supported.
+- Embeddings and multi-modal are not yet supported. Function calling: see
+  *Tool calling* above.

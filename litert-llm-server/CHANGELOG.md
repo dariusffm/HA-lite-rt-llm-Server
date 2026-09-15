@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0 — 2026-09-15
+
+- Client-side tool calling on both APIs: `tools` in requests, `tool_calls` in
+  responses, `tool` role for results. Enables Home Assistant Assist (device
+  control) and MCP-server tools (web search, weather, news).
+- New option `tool_calling` (default `true`); `false` ignores tools.
+- `litert-lm-api` 0.17.0.
+
 ## 0.1.3 — 2026-09-15
 
 - `/api/tags` entries now carry `model` in addition to `name`, as real

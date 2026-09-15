@@ -3,7 +3,8 @@
 Local LLM inference via Google LiteRT-LM. Exposes OpenAI- and
 Ollama-compatible HTTP APIs on port 8080, consumable by Home Assistant's
 "OpenAI Conversation" integration and any Ollama-compatible client
-(Node-RED nodes, Open WebUI, ...).
+(Node-RED nodes, Open WebUI, ...). Supports client-side tool calling (HA
+Assist, MCP tools).
 
 ## Supported Models (MVP)
 
