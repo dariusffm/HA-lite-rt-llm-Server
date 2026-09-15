@@ -38,6 +38,5 @@ class FilesystemCache:
         return self.root / f"{name}{MODEL_EXT}"
 
     def delete(self, name: str) -> None:
-        p = self.path_for(name)
-        if p.exists():
-            p.unlink()
+        # missing_ok also removes dangling symlinks, which ``exists()`` hides.
+        self.path_for(name).unlink(missing_ok=True)

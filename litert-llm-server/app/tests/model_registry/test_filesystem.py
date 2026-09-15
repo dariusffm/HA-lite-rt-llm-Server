@@ -30,3 +30,11 @@ def test_delete_removes_file(tmp_path: Path):
 def test_delete_unknown_is_noop(tmp_path: Path):
     cache = FilesystemCache(root=tmp_path)
     cache.delete("nope")  # must not raise
+
+
+def test_delete_removes_dangling_symlink(tmp_path: Path):
+    link = tmp_path / "gemma-4-e2b.litertlm"
+    link.symlink_to(tmp_path / "does-not-exist")
+    cache = FilesystemCache(root=tmp_path)
+    cache.delete("gemma-4-e2b")
+    assert not link.is_symlink()

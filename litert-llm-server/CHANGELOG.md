@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2 — 2026-09-15
+
+- Fix `/api/pull` still failing after 0.1.1 when a dangling model symlink
+  (left behind by 0.1.0) exists: `FilesystemCache.delete` now removes
+  dangling symlinks before the pulled file is materialized.
+
 ## 0.1.1 — 2026-09-15
 
 - Fix `/api/pull` failing with `FileNotFoundError` on Linux: the HuggingFace
