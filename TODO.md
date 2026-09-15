@@ -40,6 +40,7 @@ Fall 2 — selbstständig in Automationen (Node-RED), eigene Phase mit Spec:
 
 ## Offen daneben
 
+- [ ] RAM-Bedarf pro `context_length` messen und dokumentieren (16384 → Prozess auf dem HA-Host nach Modell-Laden gestorben, vermutlich OOM); Schutz: Watchdog an, ggf. Kontext beim Start gegen freien RAM prüfen
 - [ ] `config.yaml` `log_level` erlaubt `critical`, `config.py` `LogLevel` kennt `notice`/`fatal` statt `critical` → Auswahl `critical` in HA schlägt beim Start fehl; Werte angleichen (vorbestehend)
 - [ ] `engines/litert.py`: Producer-Thread kann bei vollem Queue und abgebrochenem Client in `q.put` hängen (cancel bricht nur den Decode ab) → `put(timeout=…)` + "consumer gone"-Flag; drei `except Exception: pass` um close()/cancel() ohne Log (vorbestehend)
 - [ ] `/v1/completions` ignoriert `stream: true` und antwortet immer non-stream (vorbestehend)
