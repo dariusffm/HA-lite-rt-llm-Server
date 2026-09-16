@@ -268,6 +268,19 @@ def _token_count(conversation: Any) -> Any:
     return count if isinstance(count, int) else "?"
 
 
+def _close_quietly(conversation: Any) -> None:
+    """Close a conversation, swallowing errors.
+
+    Shared by ``_drop_held`` and the per-request close paths in
+    ``stream_chat``, which both need to close without letting a failing
+    ``close()`` mask the original outcome.
+    """
+    try:
+        conversation.close()
+    except Exception as exc:
+        log.debug("conversation.close failed: %r", exc)
+
+
 class LiteRTEngine:
     """Single-slot LiteRT-LM engine."""
 
@@ -323,10 +336,7 @@ class LiteRTEngine:
             log.debug("conversation reuse: dropped (%s, busy: left to its request)", reason)
             return
         log.debug("conversation reuse: dropped (%s)", reason)
-        try:
-            held.conversation.close()
-        except Exception as exc:
-            log.debug("conversation.close failed: %r", exc)
+        _close_quietly(held.conversation)
 
     def _forget_other_model(self, model: str) -> None:
         """Drop the held conversation if it belongs to a different model.
@@ -463,12 +473,6 @@ class LiteRTEngine:
             active[:] = [conversation]
             return conversation
 
-        def close_quietly(conversation: Any) -> None:
-            try:
-                conversation.close()
-            except Exception as exc:
-                log.debug("conversation.close failed: %r", exc)
-
         send_kwargs: dict[str, Any] = {}
         if response_format is not None:
             send_kwargs["response_format"] = response_format
@@ -514,7 +518,7 @@ class LiteRTEngine:
                         and not q.consumer_gone.is_set()
                     )
                     shorter = _drop_oldest_exchange(turns) if retriable else None
-                    close_quietly(conversation)
+                    _close_quietly(conversation)
                     if shorter is None:
                         raise
                     dropped += len(turns) - len(shorter)
@@ -526,7 +530,7 @@ class LiteRTEngine:
                     turns = shorter
                     continue
                 except BaseException:
-                    close_quietly(conversation)
+                    _close_quietly(conversation)
                     raise
                 used_turns[:] = [*turns, messages[-1]]
                 return
@@ -544,16 +548,21 @@ class LiteRTEngine:
             conversation = active[0] if active else None
             if held is not None and new_turn is not None:
                 held.busy = False
+            # A concurrent model switch detached our held conversation while
+            # we were still using it (spec §8: busy conversations are left
+            # to their own request to close). Whatever happened to our own
+            # stream, we own the close now — it is never re-held.
+            detached_while_busy = (
+                new_turn is not None and held is not None and self._held is not held
+            )
+            should_hold = finished and can_hold and self.current_model == model
+            continuation_of_held = held is not None and conversation is held.conversation
+
             if conversation is None:
                 pass
-            elif new_turn is not None and held is not None and self._held is not held:
-                # A concurrent model switch detached this held conversation
-                # while we were still using it (spec §8: busy conversations
-                # are left to their own request to close). Whatever happened
-                # to our own stream, we own the close now — it is never
-                # re-held.
-                close_quietly(conversation)
-            elif finished and can_hold and self.current_model == model:
+            elif detached_while_busy:
+                _close_quietly(conversation)
+            elif should_hold:
                 reply = ChatTurn(
                     role="assistant",
                     content="".join(reply_parts),
@@ -567,8 +576,8 @@ class LiteRTEngine:
                     config_key=key,
                 )
                 self._hold(conversation, state)
-            elif held is not None and conversation is held.conversation:
-                reason = "stream ended without clean finish" if not finished else "reuse disabled"
+            elif continuation_of_held:
+                reason = "reuse disabled" if finished else "stream ended without clean finish"
                 self._drop_held(reason)
             else:
-                close_quietly(conversation)
+                _close_quietly(conversation)
