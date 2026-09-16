@@ -10,6 +10,7 @@ export LITERT_TEMPERATURE="$(bashio::config 'temperature')"
 export LITERT_TOOL_CALLING="$(bashio::config 'tool_calling')"
 export LITERT_CONTEXT_LENGTH="$(bashio::config 'context_length')"
 export LITERT_PROMPT_COMPACTION="$(bashio::config 'prompt_compaction')"
+export LITERT_CONVERSATION_TTL="$(bashio::config 'conversation_ttl')"
 export LITERT_MODELS_DIR="/data/models"
 export LITERT_PORT="8080"
 

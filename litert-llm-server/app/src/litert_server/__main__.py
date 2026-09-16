@@ -113,7 +113,9 @@ def make_production_app() -> FastAPI:
     cache = FilesystemCache(root=settings.models_dir)
     registry = HuggingFaceRegistry(cache=cache, hf_token=settings.hf_token)
     engine: InferenceService = LiteRTEngine(
-        models_dir=settings.models_dir, max_num_tokens=settings.context_length
+        models_dir=settings.models_dir,
+        max_num_tokens=settings.context_length,
+        conversation_ttl=settings.conversation_ttl,
     )
     compacting = compaction_enabled(settings.prompt_compaction, settings.context_length)
     if compacting:
@@ -125,6 +127,10 @@ def make_production_app() -> FastAPI:
         settings.context_length,
     )
     log.info("context length: %d", settings.context_length)
+    if settings.conversation_ttl > 0:
+        log.info("conversation reuse: enabled (ttl %ds)", settings.conversation_ttl)
+    else:
+        log.info("conversation reuse: disabled")
     if settings.max_tokens > settings.context_length:
         log.warning(
             "max_tokens (%d) exceeds context_length (%d); requests may fail",

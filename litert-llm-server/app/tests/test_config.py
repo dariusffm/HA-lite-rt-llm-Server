@@ -81,3 +81,22 @@ def test_log_level_accepts_critical(monkeypatch):
     # config.yaml's schema offers `critical` (MINOR 7); the Literal must match.
     monkeypatch.setenv("LITERT_LOG_LEVEL", "critical")
     assert Settings().log_level == "critical"
+
+
+def test_conversation_ttl_env(monkeypatch):
+    monkeypatch.setenv("LITERT_CONVERSATION_TTL", "120")
+    assert Settings().conversation_ttl == 120
+
+
+def test_conversation_ttl_defaults_to_300(monkeypatch):
+    monkeypatch.delenv("LITERT_CONVERSATION_TTL", raising=False)
+    assert Settings().conversation_ttl == 300
+
+
+def test_conversation_ttl_rejects_out_of_range(monkeypatch):
+    import pytest
+    from pydantic import ValidationError
+
+    monkeypatch.setenv("LITERT_CONVERSATION_TTL", "-1")
+    with pytest.raises(ValidationError):
+        Settings()

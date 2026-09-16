@@ -20,6 +20,7 @@ options:
   tool_calling: true
   context_length: 8192
   prompt_compaction: auto
+  conversation_ttl: 300
   preload_models: []
   hf_token: ""
 schema:
@@ -30,6 +31,7 @@ schema:
   tool_calling: bool
   context_length: int(2048,32768)
   prompt_compaction: list(off|on|auto)
+  conversation_ttl: int(0,3600)
   preload_models:
     - str
   hf_token: password?

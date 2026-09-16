@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     tool_calling: bool = True
     context_length: int = 8192
     prompt_compaction: Literal["off", "on", "auto"] = "auto"
+    conversation_ttl: int = Field(default=300, ge=0, le=3600)
     hf_token: str | None = Field(default=None, validation_alias="HF_TOKEN")
 
     @field_validator("preload_models", mode="before")
