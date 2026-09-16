@@ -81,6 +81,16 @@ def test_find_entity_ambiguous_for_two_distinct_entities():
     assert reason == "ambiguous: Komode1, Wohnzimmer-Fenster-Lampe"
 
 
+def test_find_entity_requires_word_boundaries():
+    # "Bad" must not match inside "Badezimmer"; the hyphenated name still matches.
+    assert find_entity("Wie warm ist es im Badezimmer?", _ENTITIES) == (
+        None,
+        "no known entity in user text",
+    )
+    entity, _ = find_entity("Die Wohnzimmer-Fenster-Lampe, bitte!", _ENTITIES)
+    assert entity is _ENTITIES[0]
+
+
 def test_find_entity_none_when_nothing_matches():
     assert find_entity("mach das Licht an", _ENTITIES) == (None, "no known entity in user text")
 

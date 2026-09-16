@@ -11,6 +11,7 @@ entity's real domain) is added; everything else the model decided stays.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -29,11 +30,11 @@ def find_entity(user_text: str, entities: list[Entity]) -> tuple[Entity | None, 
     Nested matches ("Bad" inside "Bad Bewegung") collapse to the longest one;
     two distinct entities are ambiguous and yield ``None``.
     """
-    haystack = user_text.casefold()
     hits: list[tuple[str, Entity]] = []
     for entity in entities:
         for name in entity_names(entity):
-            if name and name.casefold() in haystack:
+            # Whole-word match: "Bad" must not hit inside "Badezimmer".
+            if name and re.search(rf"(?<!\w){re.escape(name)}(?!\w)", user_text, re.IGNORECASE):
                 hits.append((name, entity))
     if not hits:
         return None, "no known entity in user text"
