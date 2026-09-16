@@ -1,4 +1,4 @@
-# E2E — Prompt Compaction (Add-on 0.3.0/0.3.1) auf Home Assistant
+# E2E — Prompt Compaction (Add-on 0.3.0–0.3.2) auf Home Assistant
 
 **Datum:** 2026-09-16  **Host:** HAOS `homek` (HA Core 2026.9.2), Add-on `83680c0c_litert_llm_server`, Modell `gemma-4-e2b`,
 `context_length` 8192, `prompt_compaction` auto (aktiv), 176 freigegebene Entitäten.
@@ -27,3 +27,24 @@ HA-Agent: Kontextfenster 8192, Max. Verlauf 6, Anweisung „always call GetLiveC
   Bereich zuordnen (Kuratierung).
 - 51 statt 176 Entitäten ist noch großzügig (ODER-Verknüpfung: alle `climate` + alles in „Bad“ + Namens-Teilstrings).
   Für die Antwortzeit zählt der Systemprompt-Prefill; grob 51/176 ≈ 30 % der Entitäten-Tokens.
+
+## Nachtest mit 0.3.2 (Domänen-Hinweis in der Kürzungsnotiz)
+
+| Frage | Compaction-Log | Tool-Aufruf | Ergebnis |
+|---|---|---|---|
+| Wie warm ist es im Bad? | `entities 176→51, stage-1 11.5s (cache miss)` | weiterhin `GetLiveContext{domain: climate, area: Bad}` | HA: `No exposed entities found in area 'Bad'` → „I do not have live information for the temperature in the Bad.“ |
+| Schalte die Wohnzimmer-Fenster-Lampe ein (2×) | kein Request im Add-on | – | HAs lokale Satzerkennung schaltete direkt („Licht eingeschaltet“); das Modell war nicht beteiligt |
+| Ich brauche die Wohnzimmer-Fenster-Lampe nicht mehr, mach sie bitte wieder aus | `entities 176→30, stage-1 12.5s (cache miss)`, Folgerunden `cache hit` | `HassTurnOff{name: Wohnzimmer-Fenster-Lampe}` | HA: `success: light.wohnzimmer_fenster_lampe`, `failed: []` — **Schalten über das Modell bestanden** |
+
+### Ursache der Sensorfrage (geprüft in Einstellungen → Sprachassistenten → Verfügbarkeit)
+
+- Im Bereich „Bad“ sind nur drei Entitäten freigegeben: Licht „Bad“, Lüfter „Bad“, „Bad Bewegung“. Kein Temperatursensor.
+- Die Bad-Sensoren „Sonoff-Termo-Bad Temperatur“, „Thermo-BadOben Temperatur“, „Thermo-BadOben Luftfeuchtigkeit“ und das
+  Thermostat „Sonoff-Termo-Bad“ (`climate`) sind freigegeben, aber **ohne Bereich**. Mit Bereich „Bad“ hätte selbst
+  `{domain: climate, area: Bad}` das Thermostat geliefert; die Modellwahl `climate` war also nicht das eigentliche Problem.
+- Spritpreis: kein Diesel-/Tankstellen-Sensor ist für Assist freigegeben (Suche „Diesel“ in der Freigabeliste leer),
+  obwohl das Dashboard Shell-/TotalEnergies-Preise zeigt.
+- Der Hinweis in der Kürzungsnotiz (0.3.2) änderte die Domänenwahl von Gemma 4 E2B nicht; er bleibt als harmlose Hilfe drin.
+
+**Hebel (HA-Kuratierung, kein Add-on-Code):** die vier Bad-Entitäten dem Bereich „Bad“ zuordnen; den gewünschten
+Spritpreis-Sensor für Assist freigeben. Danach beide Fragen wiederholen.
