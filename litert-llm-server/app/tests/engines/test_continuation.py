@@ -63,13 +63,17 @@ def test_same_turn_ignores_tool_call_arguments_but_not_names():
     repaired = ChatTurn(
         role="assistant",
         content="",
-        tool_calls=[ToolCall(id="z", name="GetLiveContext", arguments={"domain": "switch", "name": "x"})],
+        tool_calls=[
+            ToolCall(id="z", name="GetLiveContext", arguments={"domain": "switch", "name": "x"})
+        ],
     )
     assert same_turn(_CALL_MODEL, repaired)
     other_tool = ChatTurn(
         role="assistant",
         content="",
-        tool_calls=[ToolCall(id="z", name="HassTurnOn", arguments={"domain": "light", "area": "Bad"})],
+        tool_calls=[
+            ToolCall(id="z", name="HassTurnOn", arguments={"domain": "light", "area": "Bad"})
+        ],
     )
     assert not same_turn(_CALL_MODEL, other_tool)
 
