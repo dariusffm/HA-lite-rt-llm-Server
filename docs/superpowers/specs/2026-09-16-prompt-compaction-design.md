@@ -1,6 +1,6 @@
 # Design — Mehrstufige Prompt-Kürzung (Prompt Compaction) für litert-llm-server
 
-**Status:** Freigegeben (User-Freigabe am 2026-09-16 im Chat, abschnittsweise)
+**Status:** Freigegeben (User-Freigabe am 2026-09-16 im Chat, abschnittsweise; Architektur-Review 2026-09-16: „umsetzen mit drei Präzisierungen“, eingearbeitet)
 **Datum:** 2026-09-16
 **Scope:** Add-on `litert-llm-server`, Version 0.3.0
 **Basis:** Spec `2026-09-15-tool-calling-design.md`; Berichte
@@ -69,12 +69,20 @@ Protokoll `InferenceService`:
   1. **Erkennen** (R1). Kein Marker → `inner.stream_chat` unverändert.
   2. **Zerlegen.** Systemprompt in Kopf, YAML-Entitätenliste, Rest. Aus der
      Liste vorhandene Domänen, Bereiche, Namen/Aliase sammeln.
-  3. **Stufe 1** (Abschnitt 4) über `inner.stream_chat` mit Mini-Prompt,
-     ohne Tools, mit JSON-Schema. Cache pro Fragetext.
+  3. **Stufe 1** (Abschnitt 4) über `collect_chat` (`domain/inference.py`)
+     auf `inner` mit Mini-Prompt, ohne Tools, mit JSON-Schema. `collect_chat`
+     sammelt den Stream vollständig, bevor Stufe 2 beginnt; es ist nie ein
+     zweiter Streaming-Kanal parallel offen. Cache pro Fragetext.
   4. **Kürzen** (Abschnitt 5): Systemprompt filtern, Live-Context-Tool-Turns
      kompaktieren.
   5. **Stufe 2.** `inner.stream_chat(model, gekürzte_turns, params, tools)`;
      Tokens unverändert weiterreichen.
+
+**Bekannte Einschränkung, unverändert:** Die Engine ist single-slot ohne
+Request-Lock (nur `_ensure_loaded` ist gesperrt). Nebenläufige Requests können
+schon heute überlappende Conversations erzeugen. Die Kürzung verschärft das
+nicht materiell, weil Stufe 1 und 2 innerhalb eines Requests sequenziell
+laufen. Eine Engine-Semaphore bleibt Folgearbeit (Abschnitt 9).
 
 Verdrahtung in `__main__.make_production_app`:
 
@@ -170,6 +178,9 @@ Zeichen statt Tokens zählen.
 - `GenerationParams.response_schema: dict[str, Any] | None = None`.
   `LiteRTEngine.stream_chat` setzt bei gesetztem Schema `response_format` und
   `ConstrainedDecodingConfig(enable=True)`; die Engine kennt Stufe 1 nicht.
+  **Vorrangregel:** Sind `tools` und `response_schema` gleichzeitig gesetzt,
+  gewinnt `tools` (Tool-Grammatik); `response_schema` wird ignoriert und eine
+  Warnung geloggt. Stufe 1 setzt immer `tools=None`.
 - `pyproject.toml`: `pyyaml` (+ `types-PyYAML` für mypy).
 - `.importlinter`: Vertrag `services` ↛ `engines`, `adapters`,
   `model_registry`, `config`, `litert_lm`, `huggingface_hub`, `fastapi`.
@@ -191,7 +202,8 @@ Zeichen statt Tokens zählen.
 - Durchreichen: Tools, Modell, Parameter unverändert bei `inner`;
   `stream_completion` Passthrough.
 - Engine: `response_schema` → `response_format` + constrained decoding; ohne
-  Schema nichts davon.
+  Schema nichts davon; mit `tools` und Schema zugleich gewinnt `tools`, Warnung
+  im Log.
 - Settings/`__main__`: off/on/auto × context_length 8192/16384.
 - Architektur: Import-Linter-Vertrag für `services/`.
 
@@ -215,3 +227,4 @@ Settings, Verdrahtung → Doku, Version → Rollout und Abnahme → Simplify-Pas
 - Virtuelles Detail-Tool im Add-on (durch HAs `GetLiveContext`-Filter überflüssig).
 - Kompaktierung anderer Tool-Ergebnisse als Live-Context.
 - Node-RED-Phase (Fall 2), Kuratierung der Freigabe (Nutzeraufgabe).
+- Request-Semaphore für die single-slot Engine (bestehendes Problem, siehe Abschnitt 3).
