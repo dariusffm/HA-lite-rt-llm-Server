@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import pytest
@@ -73,9 +74,11 @@ class _FakeConversation:
     def __init__(self, n_preface: int, limit: int, log: list[int]) -> None:
         self._too_long = n_preface > limit
         self.closed = False
+        self.send_kwargs: dict = {}
         log.append(n_preface)
 
-    def send_message_async(self, last):
+    def send_message_async(self, last, **kwargs):
+        self.send_kwargs = kwargs
         if self._too_long:
             raise _OVERFLOW
         yield {"content": [{"type": "text", "text": "ok"}]}
@@ -158,10 +161,13 @@ class _RecordingLiteRTEngine(_FakeLiteRTEngine):
     def __init__(self) -> None:
         super().__init__(limit=99)
         self.kwargs: list[dict] = []
+        self.conversations: list[_FakeConversation] = []
 
     def create_conversation(self, **kw):
         self.kwargs.append(kw)
-        return _FakeConversation(len(kw["messages"] or []), self.limit, self.preface_sizes)
+        conv = _FakeConversation(len(kw["messages"] or []), self.limit, self.preface_sizes)
+        self.conversations.append(conv)
+        return conv
 
 
 async def test_stream_chat_enables_constrained_decoding_when_tools_are_given(tmp_path: Path):
@@ -184,3 +190,50 @@ async def test_stream_chat_leaves_constrained_decoding_off_without_tools(tmp_pat
         pass
 
     assert fake.kwargs[0]["constrained_decoding_config"] is None
+
+
+_PATTERN = r'\{"a":"[^"]{1,10}"\}'
+
+
+async def test_generation_params_response_pattern_defaults_to_none():
+    assert _PARAMS.response_pattern is None
+
+
+async def test_stream_chat_with_pattern_uses_ll_guidance_and_regex_response_format(tmp_path: Path):
+    fake = _RecordingLiteRTEngine()
+    engine = _loaded_engine(tmp_path, fake)
+    params = GenerationParams(temperature=0.0, max_tokens=32, response_pattern=_PATTERN)
+
+    async for _ in engine.stream_chat("m", [_sys(), _user(1)], params):
+        pass
+
+    cfg = fake.kwargs[0]["constrained_decoding_config"]
+    assert cfg.enable is True and cfg.provider is not None and cfg.provider.name == "LL_GUIDANCE"
+    fmt = fake.conversations[0].send_kwargs["response_format"]
+    assert fmt.type == 1  # ResponseFormat.Type.REGEX
+    assert fmt.schema_or_pattern == _PATTERN
+
+
+async def test_stream_chat_tools_win_over_pattern(tmp_path: Path, caplog: pytest.LogCaptureFixture):
+    fake = _RecordingLiteRTEngine()
+    engine = _loaded_engine(tmp_path, fake)
+    params = GenerationParams(temperature=0.0, max_tokens=32, response_pattern=_PATTERN)
+    tools = [ToolSpec(name="T", description="d", parameters={"type": "object"})]
+
+    with caplog.at_level(logging.WARNING, logger="litert_server.engines.litert"):
+        async for _ in engine.stream_chat("m", [_sys(), _user(1)], params, tools=tools):
+            pass
+
+    assert "response_format" not in fake.conversations[0].send_kwargs
+    assert fake.kwargs[0]["constrained_decoding_config"].provider is None
+    assert "response_pattern ignored" in caplog.text
+
+
+async def test_stream_chat_without_pattern_sends_no_response_format(tmp_path: Path):
+    fake = _RecordingLiteRTEngine()
+    engine = _loaded_engine(tmp_path, fake)
+
+    async for _ in engine.stream_chat("m", [_sys(), _user(1)], _PARAMS):
+        pass
+
+    assert "response_format" not in fake.conversations[0].send_kwargs

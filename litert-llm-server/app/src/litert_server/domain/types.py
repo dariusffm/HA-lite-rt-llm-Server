@@ -65,6 +65,9 @@ class GenerationParams(BaseModel):
     temperature: float = Field(ge=0.0, le=2.0)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     stop: list[str] | None = None
+    # Regex the whole reply must match. Engines that support constrained
+    # decoding enforce it; ignored when tools are offered (tool grammar wins).
+    response_pattern: str | None = None
 
 
 class Token(BaseModel):

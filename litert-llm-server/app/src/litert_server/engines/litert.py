@@ -10,7 +10,14 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Any
 
-from litert_lm import Backend, ConstrainedDecodingConfig, Engine, SamplerConfig
+from litert_lm import (
+    Backend,
+    ConstrainedDecodingConfig,
+    Engine,
+    LiteRtLmConstraintProviderType,
+    ResponseFormat,
+    SamplerConfig,
+)
 from litert_lm.interfaces import Tool
 
 from litert_server.domain.types import (
@@ -318,7 +325,21 @@ class LiteRTEngine:
         # ``{domain:light}``), which surfaces as an engine error instead of a
         # tool call. Constraining generation to the tool grammar fixes this
         # and leaves plain-text replies untouched (spike 2026-09-16).
-        constrained = ConstrainedDecodingConfig(enable=True) if schema_tools else None
+        response_format: Any | None = None
+        if schema_tools:
+            constrained: ConstrainedDecodingConfig | None = ConstrainedDecodingConfig(enable=True)
+            if params.response_pattern is not None:
+                log.warning("response_pattern ignored: tools take precedence")
+        elif params.response_pattern is not None:
+            constrained = ConstrainedDecodingConfig(
+                enable=True, provider=LiteRtLmConstraintProviderType.LL_GUIDANCE
+            )
+            response_format = ResponseFormat(
+                type=ResponseFormat.Type.REGEX,
+                schema_or_pattern=params.response_pattern,
+            )
+        else:
+            constrained = None
         sampler = self._build_sampler(params)
         active: list[Any] = []  # the conversation currently decoding, for cancel
 
@@ -346,7 +367,10 @@ class LiteRTEngine:
             while True:
                 conversation = open_conversation(turns)
                 try:
-                    for chunk in conversation.send_message_async(last):
+                    send_kwargs: dict[str, Any] = {}
+                    if response_format is not None:
+                        send_kwargs["response_format"] = response_format
+                    for chunk in conversation.send_message_async(last, **send_kwargs):
                         calls = _extract_tool_calls(chunk) if tools else None
                         if calls:
                             q.put(calls)
