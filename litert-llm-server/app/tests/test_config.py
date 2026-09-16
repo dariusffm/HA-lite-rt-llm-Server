@@ -110,3 +110,22 @@ def test_tool_call_repair_env_false(monkeypatch):
 def test_tool_call_repair_defaults_true(monkeypatch):
     monkeypatch.delenv("LITERT_TOOL_CALL_REPAIR", raising=False)
     assert Settings().tool_call_repair is True
+
+
+def test_generation_timeout_env(monkeypatch):
+    monkeypatch.setenv("LITERT_GENERATION_TIMEOUT", "60")
+    assert Settings().generation_timeout == 60
+
+
+def test_generation_timeout_defaults_to_120(monkeypatch):
+    monkeypatch.delenv("LITERT_GENERATION_TIMEOUT", raising=False)
+    assert Settings().generation_timeout == 120
+
+
+def test_generation_timeout_rejects_out_of_range(monkeypatch):
+    import pytest
+    from pydantic import ValidationError
+
+    monkeypatch.setenv("LITERT_GENERATION_TIMEOUT", "601")
+    with pytest.raises(ValidationError):
+        Settings()

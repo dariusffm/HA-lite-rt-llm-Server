@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.3 — 2026-09-16
+
+- Diagnostics: the engine now logs generation timing at DEBUG (start,
+  first/every-50th chunk, producer finish/failure, `cancel_process`/
+  `conversation.close` duration) so a stalled generation can be traced from
+  the logs. A client abort mid-generation now logs a WARNING with elapsed
+  time, chunk count, text chars produced and any tool-call fragment.
+- New option `generation_timeout` (seconds, default 120, `0` disables): a
+  generation that runs longer than the budget without finishing is
+  cancelled, the same WARNING is logged, and the stream ends with a
+  `RuntimeError` instead of hanging until the client's own timeout.
+- `cancel_process()` on abort or timeout now runs off the event-loop thread,
+  so a slow C-side cancel can no longer stall the consumer coroutine.
+
 ## 0.4.2 — 2026-09-16
 
 - Conversation reuse now compares tool-call *names* only when matching HA's

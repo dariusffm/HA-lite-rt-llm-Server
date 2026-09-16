@@ -12,6 +12,7 @@ export LITERT_CONTEXT_LENGTH="$(bashio::config 'context_length')"
 export LITERT_PROMPT_COMPACTION="$(bashio::config 'prompt_compaction')"
 export LITERT_CONVERSATION_TTL="$(bashio::config 'conversation_ttl')"
 export LITERT_TOOL_CALL_REPAIR="$(bashio::config 'tool_call_repair')"
+export LITERT_GENERATION_TIMEOUT="$(bashio::config 'generation_timeout')"
 export LITERT_MODELS_DIR="/data/models"
 export LITERT_PORT="8080"
 

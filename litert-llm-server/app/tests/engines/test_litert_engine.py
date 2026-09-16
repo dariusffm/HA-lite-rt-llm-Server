@@ -576,3 +576,48 @@ async def test_continuation_abort_closes_on_producer_thread_not_loop_thread(tmp_
     assert conv.close_thread_ident is not None
     assert conv.close_thread_ident != loop_thread_ident
     assert engine._held is None
+
+
+# --- 0.4.3: generation_timeout ----------------------------------------------
+
+
+async def test_continuation_timeout_closes_once_and_drops_held(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    hundred_chunks = [{"content": [{"type": "text", "text": "x"}]}] * 100
+    fake = _SlowReuseEngine([_TEXT, hundred_chunks])
+    engine = LiteRTEngine(models_dir=tmp_path, conversation_ttl=300.0, generation_timeout=0.3)
+    engine._engine = fake
+    engine.current_model = "m"
+
+    await _drain(engine, [_sys(), _user(1)])
+
+    caplog.set_level(logging.WARNING, logger="litert_server.engines.litert")
+    with pytest.raises(RuntimeError, match="generation timed out"):
+        await _drain(
+            engine,
+            [_sys(), _user(1), ChatTurn(role="assistant", content="ok"), _user(2)],
+        )
+    await asyncio.sleep(0.3)  # let the producer thread notice consumer_gone and close
+
+    conv = fake.conversations[0]
+    assert conv.closed == 1
+    assert conv.cancelled >= 1
+    assert engine._held is None
+    assert "generation timed out after" in caplog.text
+    assert "chunks" in caplog.text
+
+
+async def test_generation_timeout_zero_disables_timeout(tmp_path: Path):
+    five_chunks = [{"content": [{"type": "text", "text": "x"}]}] * 5
+    fake = _SlowReuseEngine([_TEXT, five_chunks])
+    engine = LiteRTEngine(models_dir=tmp_path, conversation_ttl=300.0, generation_timeout=0)
+    engine._engine = fake
+    engine.current_model = "m"
+
+    await _drain(engine, [_sys(), _user(1)])
+    result = await _drain(
+        engine, [_sys(), _user(1), ChatTurn(role="assistant", content="ok"), _user(2)]
+    )
+
+    assert "".join(t.text for t in result) == "xxxxx"

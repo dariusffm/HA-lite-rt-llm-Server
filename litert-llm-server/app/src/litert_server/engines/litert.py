@@ -7,7 +7,7 @@ import logging
 import queue
 import time
 from collections.abc import AsyncIterator, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Any
@@ -87,16 +87,70 @@ class _TokenQueue(queue.Queue[Any]):
             pass
 
 
-async def _bridge_producer(producer: Producer, cancel: Cancel) -> AsyncIterator[Token]:
+# How long the abort/timeout path waits on ``cancel()`` to finish before
+# giving up on it: bounds how long a slow ``cancel_process`` can hold up the
+# consumer coroutine (R4), while still letting a fast cancel complete before
+# this call returns.
+_CANCEL_JOIN_SECONDS = 0.1
+
+# How long a poll for the next queue item waits before re-checking the
+# generation-timeout budget, so a producer that emits nothing is still
+# caught (R3).
+_QUEUE_POLL_SECONDS = 1.0
+
+
+@dataclass
+class _GenState:
+    """Progress of one generation as observed by ``_bridge_producer``: start
+    time and chunk count for the R1 timing diagnostics, plus the text and
+    tool-call fragment produced so far so the abort (R2) and timeout (R3)
+    warnings can summarize what was lost."""
+
+    started: float = field(default_factory=time.monotonic)
+    chunks: int = 0
+    text_parts: list[str] = field(default_factory=list)
+    tool_fragment: list[ToolCall] | None = None
+
+
+def _abort_summary(state: _GenState) -> tuple[int, int, list[ToolCall] | None]:
+    text = "".join(state.text_parts)
+    return state.chunks, min(len(text), 300), state.tool_fragment
+
+
+def _cancel_and_log(cancel: Cancel) -> None:
+    started = time.monotonic()
+    try:
+        cancel()
+    except Exception as exc:
+        log.debug("cancel_process failed: %r", exc)
+    finally:
+        log.debug("cancel_process took %.2fs", time.monotonic() - started)
+
+
+def _fire_cancel(cancel: Cancel) -> None:
+    """Run ``cancel`` off the event loop so a slow ``cancel_process`` never
+    blocks the consumer coroutine (R4)."""
+    thread = Thread(target=_cancel_and_log, args=(cancel,), daemon=True)
+    thread.start()
+    thread.join(_CANCEL_JOIN_SECONDS)
+
+
+async def _bridge_producer(
+    producer: Producer, cancel: Cancel, *, generation_timeout: float = 0.0
+) -> AsyncIterator[Token]:
     """Run a synchronous ``producer`` in a daemon thread and yield tokens it
     puts on a bounded queue. On ``GeneratorExit`` (client disconnect) or
     ``asyncio.CancelledError`` (e.g. an ``asyncio.timeout`` firing while a
     caller awaits this stream) the ``cancel`` callable is invoked so the
     upstream C resource can abort an in-flight decode, and the queue stops
     accepting items so the producer thread ends instead of blocking on a
-    full queue.
+    full queue. ``generation_timeout`` (seconds, ``0`` disables) bounds the
+    whole generation: once it elapses without the producer finishing, the
+    same abort path runs and the stream ends with a ``RuntimeError`` instead
+    of propagating ``GeneratorExit``/``CancelledError``.
     """
     q = _TokenQueue(maxsize=_TOKEN_QUEUE_MAX)
+    state = _GenState()
 
     def runner() -> None:
         try:
@@ -118,23 +172,61 @@ async def _bridge_producer(producer: Producer, cancel: Cancel) -> AsyncIterator[
     index = 0
     try:
         while True:
-            item = await loop.run_in_executor(None, q.get)
+            if generation_timeout and (time.monotonic() - state.started) > generation_timeout:
+                q.consumer_gone.set()
+                _fire_cancel(cancel)
+                chunks, text_chars, fragment = _abort_summary(state)
+                log.warning(
+                    "generation timed out after %.0fs: %d chunks, %d text chars, "
+                    "tool-call fragment=%r",
+                    generation_timeout,
+                    chunks,
+                    text_chars,
+                    fragment,
+                )
+                raise RuntimeError(f"generation timed out after {generation_timeout:.0f}s")
+            try:
+                item = await loop.run_in_executor(None, q.get, True, _QUEUE_POLL_SECONDS)
+            except queue.Empty:
+                continue
             if item is _SENTINEL:
+                log.debug(
+                    "producer finished after %.1fs (%d chunks)",
+                    time.monotonic() - state.started,
+                    state.chunks,
+                )
                 yield Token(text="", index=index, finish_reason="stop")
                 return
             if isinstance(item, Exception):
+                log.debug(
+                    "producer failed after %.1fs: %r", time.monotonic() - state.started, item
+                )
                 raise item
+            state.chunks += 1
+            chunk_elapsed = time.monotonic() - state.started
+            if state.chunks == 1:
+                log.debug("first chunk after %.1fs", chunk_elapsed)
+            elif state.chunks % 50 == 0:
+                log.debug("chunk %d after %.1fs", state.chunks, chunk_elapsed)
             if isinstance(item, list):
+                state.tool_fragment = item
                 yield Token(text="", index=index, finish_reason="tool_calls", tool_calls=item)
                 return
+            state.text_parts.append(str(item))
             yield Token(text=str(item), index=index, finish_reason=None)
             index += 1
     except (GeneratorExit, asyncio.CancelledError):
         q.consumer_gone.set()
-        try:
-            cancel()
-        except Exception as exc:
-            log.debug("cancel_process failed: %r", exc)
+        _fire_cancel(cancel)
+        chunks, text_chars, fragment = _abort_summary(state)
+        log.warning(
+            "generation aborted by client after %.1fs: %d chunks, %d text chars, "
+            "tool-call fragment=%r",
+            time.monotonic() - state.started,
+            chunks,
+            text_chars,
+            fragment,
+        )
         raise
 
 
@@ -275,21 +367,30 @@ def _close_quietly(conversation: Any) -> None:
     ``stream_chat``, which both need to close without letting a failing
     ``close()`` mask the original outcome.
     """
+    started = time.monotonic()
     try:
         conversation.close()
     except Exception as exc:
         log.debug("conversation.close failed: %r", exc)
+    finally:
+        log.debug("conversation.close took %.2fs", time.monotonic() - started)
 
 
 class LiteRTEngine:
     """Single-slot LiteRT-LM engine."""
 
     def __init__(
-        self, *, models_dir: Path, max_num_tokens: int = 8192, conversation_ttl: float = 300.0
+        self,
+        *,
+        models_dir: Path,
+        max_num_tokens: int = 8192,
+        conversation_ttl: float = 300.0,
+        generation_timeout: float = 120.0,
     ) -> None:
         self.models_dir = models_dir
         self.max_num_tokens = max_num_tokens
         self.conversation_ttl = conversation_ttl
+        self.generation_timeout = generation_timeout
         self._lock = Lock()
         self.current_model: str | None = None
         self._engine: Any | None = None
@@ -391,6 +492,7 @@ class LiteRTEngine:
         )
 
         def producer(q: queue.Queue[Any]) -> None:
+            log.debug("generation started (fresh, 1 prompt turns)")
             try:
                 session.run_prefill([prompt])
                 for resp in session.run_decode_async():
@@ -402,7 +504,9 @@ class LiteRTEngine:
                 except Exception as exc:
                     log.debug("session.close failed: %r", exc)
 
-        async for tok in _bridge_producer(producer, session.cancel_process):
+        async for tok in _bridge_producer(
+            producer, session.cancel_process, generation_timeout=self.generation_timeout
+        ):
             yield tok
 
     async def stream_chat(
@@ -509,6 +613,7 @@ class LiteRTEngine:
 
         def producer(q: _TokenQueue) -> None:
             if new_turn is not None and held is not None:
+                log.debug("generation started (continuation, 1 prompt turns)")
                 conversation = held.conversation
                 active[:] = [conversation]
                 try:
@@ -522,6 +627,7 @@ class LiteRTEngine:
                     _close_quietly(conversation)
                     raise
                 return
+            log.debug("generation started (fresh, %d prompt turns)", len(messages))
             turns = preface
             dropped = 0
             while True:
@@ -564,7 +670,9 @@ class LiteRTEngine:
 
         finished = False
         try:
-            async for tok in _bridge_producer(producer, cancel):
+            async for tok in _bridge_producer(
+                producer, cancel, generation_timeout=self.generation_timeout
+            ):
                 yield tok
             finished = True
         finally:

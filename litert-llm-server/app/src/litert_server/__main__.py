@@ -80,7 +80,7 @@ def build_app(
     registry: ModelRegistry,
     tools_enabled: bool = True,
 ) -> FastAPI:
-    app = FastAPI(title="litert-llm-server", version="0.4.2")
+    app = FastAPI(title="litert-llm-server", version="0.4.3")
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
@@ -117,6 +117,7 @@ def make_production_app() -> FastAPI:
         models_dir=settings.models_dir,
         max_num_tokens=settings.context_length,
         conversation_ttl=settings.conversation_ttl,
+        generation_timeout=settings.generation_timeout,
     )
     compacting = compaction_enabled(settings.prompt_compaction, settings.context_length)
     if compacting:
@@ -135,6 +136,10 @@ def make_production_app() -> FastAPI:
         log.info("conversation reuse: enabled (ttl %ds)", settings.conversation_ttl)
     else:
         log.info("conversation reuse: disabled")
+    if settings.generation_timeout > 0:
+        log.info("generation timeout: %ds", settings.generation_timeout)
+    else:
+        log.info("generation timeout: disabled")
     if settings.max_tokens > settings.context_length:
         log.warning(
             "max_tokens (%d) exceeds context_length (%d); requests may fail",
