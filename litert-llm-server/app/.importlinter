@@ -34,3 +34,17 @@ forbidden_modules =
     huggingface_hub
     fastapi
     uvicorn
+
+[importlinter:contract:services-only-domain]
+name = Services import only domain and pyyaml
+type = forbidden
+source_modules =
+    litert_server.services
+forbidden_modules =
+    litert_server.engines
+    litert_server.adapters
+    litert_server.model_registry
+    litert_server.config
+    litert_lm
+    huggingface_hub
+    fastapi

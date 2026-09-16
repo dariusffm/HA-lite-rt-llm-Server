@@ -1,0 +1,114 @@
+"""Parsing and rendering of Home Assistant's Assist prompt fragments."""
+
+from __future__ import annotations
+
+import json
+
+from litert_server.services.ha_prompt import (
+    FILTER_NOTE,
+    STATIC_MARKER,
+    compact_live_context,
+    entity_areas,
+    entity_names,
+    render_static_context,
+    split_static_context,
+)
+
+HEAD = "You are a voice assistant for Home Assistant.\nAnswer truthfully.\n"
+ENTITIES_YAML = (
+    "- names: Wohnzimmer Lampe\n"
+    "  domain: light\n"
+    "  areas: Wohnzimmer\n"
+    "- names: Bad Temperatur\n"
+    "  domain: sensor\n"
+    "  areas: Bad\n"
+    "  aliases:\n"
+    "  - Badthermometer\n"
+    "- names: Küche Steckdose\n"
+    "  domain: switch\n"
+)
+PROMPT = HEAD + STATIC_MARKER + "\n" + ENTITIES_YAML
+
+
+def test_split_static_context_returns_head_entities_tail():
+    ctx = split_static_context(PROMPT)
+
+    assert ctx is not None
+    assert ctx.head == HEAD
+    assert [e["domain"] for e in ctx.entities] == ["light", "sensor", "switch"]
+    assert ctx.tail == ""
+
+
+def test_split_static_context_keeps_text_after_the_list_as_tail():
+    ctx = split_static_context(PROMPT + "Answer in German.\n")
+
+    assert ctx is not None
+    assert ctx.tail == "Answer in German.\n"
+    assert len(ctx.entities) == 3
+
+
+def test_split_static_context_returns_none_without_marker():
+    assert split_static_context("You are a helpful assistant.") is None
+
+
+def test_split_static_context_returns_none_for_broken_yaml():
+    assert split_static_context(HEAD + STATIC_MARKER + "\n- names: [unclosed\n") is None
+
+
+def test_render_static_context_keeps_head_and_tail_and_adds_note():
+    ctx = split_static_context(PROMPT + "Answer in German.\n")
+    assert ctx is not None
+
+    out = render_static_context(ctx, [ctx.entities[0]])
+
+    assert out.startswith(HEAD + STATIC_MARKER + "\n" + FILTER_NOTE + "\n")
+    assert out.endswith("Answer in German.\n")
+    assert "Wohnzimmer Lampe" in out and "Bad Temperatur" not in out
+    assert split_static_context(out) is not None  # still parseable
+
+
+def test_entity_names_includes_aliases_and_entity_areas_accepts_str_or_list():
+    e = {"names": "Bad Temperatur", "aliases": ["Badthermometer"], "areas": "Bad"}
+
+    assert entity_names(e) == ["Bad Temperatur", "Badthermometer"]
+    assert entity_areas(e) == ["Bad"]
+    assert entity_areas({"names": "x", "areas": ["A", "B"]}) == ["A", "B"]
+    assert entity_areas({"names": "x"}) == []
+
+
+LIVE = (
+    "Live Context: An overview of the areas and the devices in this smart home:\n"
+    "- names: Wohnzimmer Lampe\n  domain: light\n  state: 'on'\n  areas: Wohnzimmer\n"
+    "  attributes:\n    brightness: 180\n"
+    "- names: Bad Temperatur\n  domain: sensor\n  state: '21.4'\n  areas: Bad\n"
+)
+
+
+def test_compact_live_context_rewrites_one_line_per_entity():
+    out = compact_live_context(LIVE)
+
+    assert out == (
+        "Live Context (compact):\n"
+        "Wohnzimmer Lampe [light, Wohnzimmer]: on, brightness=180\n"
+        "Bad Temperatur [sensor, Bad]: 21.4"
+    )
+
+
+def test_compact_live_context_handles_ha_json_envelope():
+    content = json.dumps({"success": True, "result": LIVE})
+
+    out = compact_live_context(content)
+
+    assert out is not None
+    data = json.loads(out)
+    assert data["success"] is True
+    assert data["result"].startswith("Live Context (compact):\n")
+
+
+def test_compact_live_context_returns_none_for_other_tool_results():
+    assert compact_live_context("The weather is sunny.") is None
+    assert compact_live_context(json.dumps({"success": True, "result": "done"})) is None
+
+
+def test_compact_live_context_returns_none_for_broken_yaml():
+    assert compact_live_context("Live Context: An overview…\n- names: [oops\n") is None
