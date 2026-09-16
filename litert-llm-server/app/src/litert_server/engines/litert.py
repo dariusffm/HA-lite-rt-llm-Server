@@ -184,7 +184,7 @@ async def _bridge_producer(
                     text_chars,
                     fragment,
                 )
-                raise RuntimeError(f"generation timed out after {generation_timeout:.0f}s")
+                raise RuntimeError(f"generation timed out after {generation_timeout:.0f} s")
             try:
                 item = await loop.run_in_executor(None, q.get, True, _QUEUE_POLL_SECONDS)
             except queue.Empty:
@@ -579,6 +579,12 @@ class LiteRTEngine:
         used_turns: list[ChatTurn] = list(messages)  # what the conversation contains at the end
         reply_parts: list[str] = []
         reply_calls: list[ToolCall] = []
+        # Set by the producer thread right after it returns normally from
+        # ``stream_reply`` (fresh or continuation), before this thread's
+        # ``finally`` can observe it. Closes the remaining gap where the
+        # producer finished cleanly but the client left before the consumer
+        # read the sentinel: nothing would otherwise close the conversation.
+        producer_done = Event()
 
         def open_conversation(turns: list[ChatTurn]) -> Any:
             conversation = engine.create_conversation(
@@ -626,6 +632,7 @@ class LiteRTEngine:
                     # it. The event-loop thread only detaches afterwards.
                     _close_quietly(conversation)
                     raise
+                producer_done.set()
                 return
             log.debug("generation started (fresh, %d prompt turns)", len(messages))
             turns = preface
@@ -661,6 +668,7 @@ class LiteRTEngine:
                 except BaseException:
                     _close_quietly(conversation)
                     raise
+                producer_done.set()
                 used_turns[:] = [*turns, messages[-1]]
                 return
 
@@ -692,7 +700,11 @@ class LiteRTEngine:
             if conversation is None:
                 pass
             elif detached_while_busy:
-                _close_quietly(conversation)
+                # Same race as the plain else branch below: only close once
+                # the producer is provably done, otherwise its own except
+                # clause closes it.
+                if finished or producer_done.is_set():
+                    _close_quietly(conversation)
             elif should_hold:
                 reply = ChatTurn(
                     role="assistant",
@@ -720,5 +732,15 @@ class LiteRTEngine:
                     # thread's possibly still-live iteration.
                     assert held is not None
                     self._detach_held(held, "stream ended without clean finish")
+                    # The producer thread did return normally (only the
+                    # client left before the sentinel was read) — closing
+                    # here cannot race a producer that has already returned.
+                    if producer_done.is_set():
+                        _close_quietly(conversation)
             else:
-                _close_quietly(conversation)
+                # Same as above: only close once the producer is provably
+                # done (finished, or returned normally per producer_done) —
+                # otherwise its own except clause above closes it, and
+                # closing here too would race that still-live iteration.
+                if finished or producer_done.is_set():
+                    _close_quietly(conversation)

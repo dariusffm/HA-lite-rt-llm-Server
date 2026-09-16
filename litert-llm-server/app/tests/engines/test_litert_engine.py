@@ -527,9 +527,10 @@ class _SlowReuseConversation(_ReuseConversation):
     """Sleeps between chunks so a client abort can race an in-flight send,
     and records which thread actually called ``close()``."""
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, cancel_delay: float = 0.0, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.close_thread_ident: int | None = None
+        self._cancel_delay = cancel_delay
 
     def send_message_async(self, last, **kwargs):
         self.sent.append(last)
@@ -540,14 +541,25 @@ class _SlowReuseConversation(_ReuseConversation):
                 raise chunk
             yield chunk
 
+    def cancel_process(self) -> None:
+        if self._cancel_delay:
+            time.sleep(self._cancel_delay)
+        super().cancel_process()
+
     def close(self) -> None:
         self.close_thread_ident = threading.get_ident()
         super().close()
 
 
 class _SlowReuseEngine(_ReuseEngine):
+    def __init__(self, replies: list[list[dict]], cancel_delay: float = 0.0) -> None:
+        super().__init__(replies)
+        self._cancel_delay = cancel_delay
+
     def create_conversation(self, *, messages, **_kw):
-        conv = _SlowReuseConversation(self.replies, list(messages or []))
+        conv = _SlowReuseConversation(
+            self.replies, list(messages or []), cancel_delay=self._cancel_delay
+        )
         self.conversations.append(conv)
         return conv
 
@@ -621,3 +633,55 @@ async def test_generation_timeout_zero_disables_timeout(tmp_path: Path):
     )
 
     assert "".join(t.text for t in result) == "xxxxx"
+
+
+# --- fix round 1: producer thread owns close on abnormal endings, fresh path
+
+
+async def test_fresh_abort_closes_once_on_producer_thread(tmp_path: Path):
+    many_chunks = [{"content": [{"type": "text", "text": "x"}]}] * 100
+    fake = _SlowReuseEngine([many_chunks], cancel_delay=0.3)
+    engine = LiteRTEngine(models_dir=tmp_path, conversation_ttl=300.0)
+    engine._engine = fake
+    engine.current_model = "m"
+    test_thread_ident = threading.get_ident()
+
+    stream = engine.stream_chat("m", [_sys(), _user(1)], _PARAMS)
+    await anext(stream)  # the fresh conversation is now mid-flight
+    await stream.aclose()
+    await asyncio.sleep(0.5)  # give the producer thread time to notice consumer_gone and close
+
+    conv = fake.conversations[0]
+    assert conv.closed == 1
+    assert conv.close_thread_ident is not None
+    assert conv.close_thread_ident != test_thread_ident
+
+
+async def test_fresh_timeout_closes_once_and_raises(tmp_path: Path):
+    many_chunks = [{"content": [{"type": "text", "text": "x"}]}] * 100
+    fake = _SlowReuseEngine([many_chunks], cancel_delay=0.3)
+    engine = LiteRTEngine(models_dir=tmp_path, conversation_ttl=300.0, generation_timeout=0.3)
+    engine._engine = fake
+    engine.current_model = "m"
+
+    with pytest.raises(RuntimeError, match="generation timed out"):
+        await _drain(engine, [_sys(), _user(1)])
+    await asyncio.sleep(0.5)  # give the producer thread time to notice consumer_gone and close
+
+    conv = fake.conversations[0]
+    assert conv.closed == 1
+    assert conv.cancelled >= 1
+
+
+async def test_abort_after_producer_finished_still_closes(tmp_path: Path):
+    fake = _SlowReuseEngine([_TEXT])
+    engine = LiteRTEngine(models_dir=tmp_path, conversation_ttl=300.0)
+    engine._engine = fake
+    engine.current_model = "m"
+
+    stream = engine.stream_chat("m", [_sys(), _user(1)], _PARAMS)
+    await anext(stream)
+    await asyncio.sleep(0.2)  # the producer has finished and set producer_done by now
+    await stream.aclose()
+
+    assert fake.conversations[0].closed == 1
