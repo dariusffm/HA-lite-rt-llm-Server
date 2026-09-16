@@ -1,9 +1,15 @@
+import logging
 from collections.abc import AsyncIterator
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from litert_server.__main__ import AUTO_COMPACTION_BELOW, build_app, compaction_enabled
+from litert_server.__main__ import (
+    AUTO_COMPACTION_BELOW,
+    build_app,
+    compaction_enabled,
+    configure_logging,
+)
 from litert_server.domain.types import ToolCall
 from tests.fakes.fake_engine import FakeEngine
 from tests.fakes.fake_registry import FakeRegistry
@@ -94,3 +100,32 @@ async def test_build_app_tools_disabled_ignores_tools():
 )
 def test_compaction_enabled(mode, context_length, expected):
     assert compaction_enabled(mode, context_length) is expected
+
+
+def test_configure_logging_sets_app_logger_level_and_handler():
+    configure_logging("debug")
+    app_logger = logging.getLogger("litert_server")
+    assert app_logger.level == logging.DEBUG
+    assert any(isinstance(h, logging.StreamHandler) for h in app_logger.handlers)
+    configure_logging("info")
+    assert app_logger.level == logging.INFO
+    assert sum(isinstance(h, logging.StreamHandler) for h in app_logger.handlers) == 1  # idempotent
+
+
+@pytest.mark.parametrize(
+    "name, level",
+    [
+        ("trace", logging.DEBUG),
+        ("debug", logging.DEBUG),
+        ("info", logging.INFO),
+        ("notice", logging.INFO),
+        ("warning", logging.WARNING),
+        ("error", logging.ERROR),
+        ("fatal", logging.CRITICAL),
+        ("critical", logging.CRITICAL),
+        ("bogus", logging.INFO),
+    ],
+)
+def test_configure_logging_maps_supervisor_level_names(name, level):
+    configure_logging(name)
+    assert logging.getLogger("litert_server").level == level

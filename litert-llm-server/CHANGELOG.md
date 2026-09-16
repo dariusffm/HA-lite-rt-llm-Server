@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 — 2026-09-16
+
+- The `log_level` option now applies to the add-on's own loggers. Previously
+  only uvicorn's access log honoured it and every INFO line from the app
+  (`tool calling: …`, `prompt compaction: …`) was silently dropped.
+
 ## 0.3.0 — 2026-09-16
 
 - New option `prompt_compaction` (`off` | `on` | `auto`, default `auto`).

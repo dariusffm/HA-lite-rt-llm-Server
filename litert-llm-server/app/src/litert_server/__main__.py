@@ -14,6 +14,7 @@ fakes.
 from __future__ import annotations
 
 import logging
+import sys
 
 from fastapi import FastAPI
 
@@ -41,13 +42,44 @@ def compaction_enabled(mode: str, context_length: int) -> bool:
     return context_length < AUTO_COMPACTION_BELOW
 
 
+_PY_LEVELS = {
+    "trace": logging.DEBUG,
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "notice": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+    "fatal": logging.CRITICAL,
+    "critical": logging.CRITICAL,
+}
+_APP_LOGGER = "litert_server"
+_HANDLER_NAME = "litert_server.stderr"
+
+
+def configure_logging(level_name: str) -> None:
+    """Apply the add-on's ``log_level`` option to the app's own loggers.
+
+    uvicorn's ``--log-level`` configures only uvicorn's loggers; without this
+    the ``litert_server.*`` loggers stay at the root default (WARNING) and
+    every ``log.info`` in the app is dropped. Idempotent.
+    """
+    app_logger = logging.getLogger(_APP_LOGGER)
+    app_logger.setLevel(_PY_LEVELS.get(level_name.lower(), logging.INFO))
+    if not any(h.get_name() == _HANDLER_NAME for h in app_logger.handlers):
+        handler = logging.StreamHandler(sys.stderr)
+        handler.set_name(_HANDLER_NAME)
+        handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+        app_logger.addHandler(handler)
+    app_logger.propagate = False
+
+
 def build_app(
     *,
     engine: InferenceService,
     registry: ModelRegistry,
     tools_enabled: bool = True,
 ) -> FastAPI:
-    app = FastAPI(title="litert-llm-server", version="0.3.0")
+    app = FastAPI(title="litert-llm-server", version="0.3.1")
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
@@ -77,6 +109,7 @@ def build_app(
 def make_production_app() -> FastAPI:
     """Uvicorn factory entry: ``uvicorn --factory ... :make_production_app``."""
     settings = Settings()
+    configure_logging(settings.log_level)
     cache = FilesystemCache(root=settings.models_dir)
     registry = HuggingFaceRegistry(cache=cache, hf_token=settings.hf_token)
     engine: InferenceService = LiteRTEngine(
