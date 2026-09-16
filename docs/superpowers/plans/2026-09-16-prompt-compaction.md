@@ -4,7 +4,7 @@
 
 **Goal:** Kürze HA-Assist-Prompts fragebezogen (Stufe-1-Modellaufruf → gefilterter Systemprompt + kompakte Live-Context-Tool-Ergebnisse), steuerbar über die Add-on-Option `prompt_compaction: off|on|auto`, ohne Router oder Engine-Streaming zu verändern.
 
-**Architecture:** Neue Schicht `services/` mit dem Dekorator `CompactingInferenceService`, der dasselbe `InferenceService`-Protokoll implementiert wie `LiteRTEngine` und in `__main__` je nach Option um die Engine gewickelt wird. Stufe 1 läuft über `collect_chat` auf der inneren Engine mit JSON-Schema (`GenerationParams.response_schema`, in der Engine als `response_format` + constrained decoding). Jeder Fehler in der Kürzung fällt auf den unveränderten Prompt zurück.
+**Architecture:** Neue Schicht `services/` mit dem Dekorator `CompactingInferenceService`, der dasselbe `InferenceService`-Protokoll implementiert wie `LiteRTEngine` und in `__main__` je nach Option um die Engine gewickelt wird. Stufe 1 läuft über `collect_chat` auf der inneren Engine mit Regex-Ausgabeformat (`GenerationParams.response_pattern`, in der Engine als `response_format` REGEX + constrained decoding LL_GUIDANCE). Jeder Fehler in der Kürzung fällt auf den unveränderten Prompt zurück.
 
 **Tech Stack:** Python 3.12, pydantic v2, PyYAML, litert-lm-api 0.17.0 (`ResponseFormat`, `ConstrainedDecodingConfig`, `LiteRtLmConstraintProviderType.LL_GUIDANCE`), pytest + pytest-asyncio (auto mode), ruff, mypy strict, import-linter.
 
@@ -14,11 +14,11 @@
 
 - Alle Kommandos laufen in `litert-llm-server/app/` mit `uv run …`. Tests: `uv run pytest -q`; Lint: `uv run ruff check src tests`; Format nur für neue/geänderte eigene Dateien: `uv run ruff format <datei>`; Typen: `uv run mypy src/`.
 - `services/` importiert nur `litert_server.domain` und `yaml`. Nie `engines`, `adapters`, `model_registry`, `config`, `litert_lm`, `huggingface_hub`, `fastapi` (Spec R6, Import-Linter).
-- `adapters/` bleiben unverändert (Spec R2). `domain/` bekommt nur das Feld `GenerationParams.response_schema`.
+- `adapters/` bleiben unverändert (Spec R2). `domain/` bekommt nur das Feld `GenerationParams.response_pattern`.
 - Jeder Fehler in der Kürzung → unveränderter Prompt + eine Info-Log-Zeile; nie eine Exception zum Client (Spec R3).
 - HA-Marker exakt: `Static Context: An overview of the areas and the devices in this smart home:`; Live-Context-Marker: `Live Context: An overview`.
 - Option `prompt_compaction`, Werte `off|on|auto`, Default `auto`; `auto` aktiv bei `context_length < 16384`.
-- Stufe 1: `temperature=0.0`, `max_tokens=128`, `tools=None`, Timeout 45 s, Cache max. 64 Einträge FIFO.
+- Stufe 1: `temperature=0.0`, `max_tokens=96`, `tools=None`, Timeout 45 s, Cache max. 64 Einträge FIFO.
 - Version des Add-ons nach dieser Phase: `0.3.0` (config.yaml, `__main__.py` FastAPI-`version`, CHANGELOG).
 - Chirurgische Änderungen: nur anfassen, was die Aufgabe erfordert; bestehende Formatabweichungen (ruff format) in fremden Dateien nicht mitformatieren.
 - Commits enden mit `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
@@ -29,11 +29,11 @@
 
 | Datei | Verantwortung |
 |---|---|
-| `src/litert_server/domain/types.py` | `GenerationParams.response_schema` (neu) |
-| `src/litert_server/engines/litert.py` | Schema → `ResponseFormat` + constrained decoding (LL_GUIDANCE); Vorrang `tools` |
+| `src/litert_server/domain/types.py` | `GenerationParams.response_pattern` (neu) |
+| `src/litert_server/engines/litert.py` | Pattern → `ResponseFormat(REGEX)` + constrained decoding (LL_GUIDANCE); Vorrang `tools` |
 | `src/litert_server/services/__init__.py` | Paketmarker |
 | `src/litert_server/services/ha_prompt.py` | Parsen/Rendern von HAs Static Context und Live Context (PyYAML) |
-| `src/litert_server/services/relevance.py` | Stufe-1-Prompt, JSON-Schema, Antwort-Parsing, Entitätenauswahl (pure) |
+| `src/litert_server/services/relevance.py` | Stufe-1-Prompt, Regex-Pattern, Antwort-Parsing mit Reparatur, Entitätenauswahl (pure) |
 | `src/litert_server/services/compaction.py` | `CompactingInferenceService` (Dekorator, Cache, Fallbacks, Log) |
 | `src/litert_server/config.py` | `Settings.prompt_compaction` |
 | `src/litert_server/__main__.py` | `compaction_enabled(settings)`, Verdrahtung, Start-Log, Version |
@@ -46,99 +46,13 @@
 
 ---
 
-### Task 0: Spike — JSON-Schema-Ausgabe per constrained decoding
+### Task 0: Spike — Ausgabeformat für Stufe 1 (ERLEDIGT 2026-09-16)
 
-**Files:**
-- Create (Wegwerf, außerhalb des Repos): `/private/tmp/claude-501/-Users-dariuspauly-projects-claude-homassist-addons/f3e38c6b-696b-4c6a-915e-b71a09739186/scratchpad/json_schema_spike.py`
-- Create: `docs/benchmarks/2026-09-16-json-schema-spike.md`
-
-**Interfaces:**
-- Produces: die Entscheidung, ob Task 1 den Schema-Pfad (`response_format`) baut oder den Klartext-Fallback (siehe Spec Abschnitt 4, letzter Absatz).
-
-- [ ] **Step 1: Spike-Skript schreiben**
-
-```python
-"""Throwaway: does response_format(JSON_SCHEMA) + LL_GUIDANCE yield valid JSON on CPU with Gemma 4 E2B?"""
-import json, time
-from litert_lm import Backend, ConstrainedDecodingConfig, Engine, ResponseFormat, SamplerConfig
-from litert_lm import LiteRtLmConstraintProviderType
-
-SCHEMA = {
-    "type": "object",
-    "properties": {
-        "domains": {"type": "array", "items": {"type": "string"}},
-        "areas": {"type": "array", "items": {"type": "string"}},
-        "names": {"type": "array", "items": {"type": "string"}},
-    },
-    "required": ["domains", "areas", "names"],
-}
-SYSTEM = (
-    "You route smart-home questions. Pick which entities are needed to answer.\n"
-    "Domains available: light, switch, sensor, climate, cover, media_player\n"
-    "Areas available: Bad, Küche, Wohnzimmer, Dachgeschoss, Flur\n"
-    "Return only what the question needs. Use an empty list when unsure."
-)
-QUESTIONS = [
-    "Welche Lampen sind gerade eingeschaltet?",
-    "Wie warm ist es im Bad?",
-    "Mach den Fernseher aus.",
-    "Wie geht es dem Haus?",
-]
-engine = Engine(model_path=".models/gemma-4-e2b.litertlm", backend=Backend.CPU, max_num_tokens=2048)
-for q in QUESTIONS:
-    conv = engine.create_conversation(
-        messages=[{"role": "system", "content": SYSTEM}],
-        automatic_tool_calling=False,
-        sampler_config=SamplerConfig(temperature=0.0),
-        constrained_decoding_config=ConstrainedDecodingConfig(
-            enable=True, provider=LiteRtLmConstraintProviderType.LL_GUIDANCE
-        ),
-    )
-    t0 = time.time()
-    try:
-        text = "".join(
-            item.get("text", "")
-            for chunk in conv.send_message_async(
-                {"role": "user", "content": q},
-                max_output_tokens=128,
-                response_format=ResponseFormat(
-                    type=ResponseFormat.Type.JSON_OBJECT, schema_or_pattern=json.dumps(SCHEMA)
-                ),
-            )
-            for item in (chunk.get("content") or [])
-            if isinstance(item, dict)
-        )
-        parsed = json.loads(text)
-        print(f"[ok] {q!r} -> {time.time()-t0:.1f}s {parsed}", flush=True)
-    except Exception as e:
-        print(f"[ERR] {q!r} -> {time.time()-t0:.1f}s {str(e)[:300]}", flush=True)
-    finally:
-        conv.close()
-```
-
-- [ ] **Step 2: Spike laufen lassen**
-
-Run (in `litert-llm-server/app/`): `timeout 600 uv run python <scratchpad>/json_schema_spike.py 2>&1 | grep -E "^\[(ok|ERR)\]"`
-Expected: vier Zeilen. Positiv, wenn alle `[ok]` sind und die Listen plausibel (z. B. `domains: ["light"]` für die Lampenfrage, leere Listen für „Wie geht es dem Haus?“). Negativ, wenn `[ERR]` mit `response_format cannot be used` oder ungültigem JSON.
-
-- [ ] **Step 3: Ergebnis dokumentieren**
-
-`docs/benchmarks/2026-09-16-json-schema-spike.md` mit: Datum, Aufbau (obiges Skript in zwei Sätzen), Tabelle Frage → Ergebnis → Dauer, Entscheidung (Schema-Pfad oder Klartext-Fallback). Bei negativem Ausgang zusätzlich die Fehlermeldung wörtlich.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add docs/benchmarks/2026-09-16-json-schema-spike.md
-git commit -m "docs(bench): spike — JSON-schema output via constrained decoding for stage 1
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
-```
-
-**Wenn der Spike negativ ausfällt:** Task 1 entfällt bis auf das Feld `response_schema` (bleibt als Durchreiche-Feld, Engine ignoriert es mit Debug-Log). In Task 3 ersetzt `build_stage_one_turns` die JSON-Anweisung durch: `Answer with exactly three lines: "domains: a, b", "areas: a, b", "names: a, b". Use "none" for an empty list.` und `parse_stage_one` parst diese drei Zeilen nachsichtig (Zeilen mit Präfix `domains:`/`areas:`/`names:`, Kommatrennung, `none` → leer). Der Rest des Plans bleibt gleich.
+Ergebnis in `docs/benchmarks/2026-09-16-json-schema-spike.md`: JSON-Schema-Modus negativ (Whitespace-Endlosschleife nach leerer Liste, 2 von 4 Fragen), Regex-Modus mit enger Grammatik positiv (8 von 8, ~0,6 s). Entscheidung: `GenerationParams.response_pattern` (Regex) statt `response_schema`; Parser mit Reparaturstufe. Alle folgenden Tasks sind darauf angepasst.
 
 ---
 
-### Task 1: `GenerationParams.response_schema` und Engine-Unterstützung
+### Task 1: `GenerationParams.response_pattern` und Engine-Unterstützung
 
 **Files:**
 - Modify: `src/litert_server/domain/types.py` (Klasse `GenerationParams`)
@@ -146,8 +60,8 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Test: `tests/engines/test_litert_engine.py`
 
 **Interfaces:**
-- Produces: `GenerationParams(max_tokens: int, temperature: float, top_p: float | None = None, stop: list[str] | None = None, response_schema: dict[str, Any] | None = None)`.
-- Engine-Verhalten: `response_schema` gesetzt und `tools` leer → `create_conversation(constrained_decoding_config=ConstrainedDecodingConfig(enable=True, provider=LL_GUIDANCE))` und `send_message_async(last, response_format=ResponseFormat(type=JSON_OBJECT, schema_or_pattern=json.dumps(schema)))`. `tools` gesetzt → wie bisher (`ConstrainedDecodingConfig(enable=True)`, kein `response_format`), bei zusätzlich gesetztem Schema eine Warnung.
+- Produces: `GenerationParams(max_tokens: int, temperature: float, top_p: float | None = None, stop: list[str] | None = None, response_pattern: str | None = None)`.
+- Engine-Verhalten: `response_pattern` gesetzt und `tools` leer → `create_conversation(constrained_decoding_config=ConstrainedDecodingConfig(enable=True, provider=LL_GUIDANCE))` und `send_message_async(last, response_format=ResponseFormat(type=REGEX, schema_or_pattern=pattern))`. `tools` gesetzt → wie bisher (`ConstrainedDecodingConfig(enable=True)`, kein `response_format`), bei zusätzlich gesetztem Pattern eine Warnung.
 
 - [ ] **Step 1: Fehlschlagende Tests schreiben**
 
@@ -187,17 +101,17 @@ class _RecordingLiteRTEngine(_FakeLiteRTEngine):
 Neue Tests:
 
 ```python
-_SCHEMA = {"type": "object", "properties": {"a": {"type": "string"}}, "required": ["a"]}
+_PATTERN = r'\{"a":"[^"]{1,10}"\}'
 
 
-async def test_generation_params_response_schema_defaults_to_none():
-    assert _PARAMS.response_schema is None
+async def test_generation_params_response_pattern_defaults_to_none():
+    assert _PARAMS.response_pattern is None
 
 
-async def test_stream_chat_with_schema_uses_ll_guidance_and_response_format(tmp_path: Path):
+async def test_stream_chat_with_pattern_uses_ll_guidance_and_regex_response_format(tmp_path: Path):
     fake = _RecordingLiteRTEngine()
     engine = _loaded_engine(tmp_path, fake)
-    params = GenerationParams(temperature=0.0, max_tokens=32, response_schema=_SCHEMA)
+    params = GenerationParams(temperature=0.0, max_tokens=32, response_pattern=_PATTERN)
 
     async for _ in engine.stream_chat("m", [_sys(), _user(1)], params):
         pass
@@ -205,14 +119,14 @@ async def test_stream_chat_with_schema_uses_ll_guidance_and_response_format(tmp_
     cfg = fake.kwargs[0]["constrained_decoding_config"]
     assert cfg.enable is True and cfg.provider is not None and cfg.provider.name == "LL_GUIDANCE"
     fmt = fake.conversations[0].send_kwargs["response_format"]
-    assert fmt.type == 2  # ResponseFormat.Type.JSON_OBJECT
-    assert json.loads(fmt.schema_or_pattern) == _SCHEMA
+    assert fmt.type == 1  # ResponseFormat.Type.REGEX
+    assert fmt.schema_or_pattern == _PATTERN
 
 
-async def test_stream_chat_tools_win_over_schema(tmp_path: Path, caplog: pytest.LogCaptureFixture):
+async def test_stream_chat_tools_win_over_pattern(tmp_path: Path, caplog: pytest.LogCaptureFixture):
     fake = _RecordingLiteRTEngine()
     engine = _loaded_engine(tmp_path, fake)
-    params = GenerationParams(temperature=0.0, max_tokens=32, response_schema=_SCHEMA)
+    params = GenerationParams(temperature=0.0, max_tokens=32, response_pattern=_PATTERN)
     tools = [ToolSpec(name="T", description="d", parameters={"type": "object"})]
 
     with caplog.at_level(logging.WARNING, logger="litert_server.engines.litert"):
@@ -221,10 +135,10 @@ async def test_stream_chat_tools_win_over_schema(tmp_path: Path, caplog: pytest.
 
     assert "response_format" not in fake.conversations[0].send_kwargs
     assert fake.kwargs[0]["constrained_decoding_config"].provider is None
-    assert "response_schema ignored" in caplog.text
+    assert "response_pattern ignored" in caplog.text
 
 
-async def test_stream_chat_without_schema_sends_no_response_format(tmp_path: Path):
+async def test_stream_chat_without_pattern_sends_no_response_format(tmp_path: Path):
     fake = _RecordingLiteRTEngine()
     engine = _loaded_engine(tmp_path, fake)
 
@@ -234,12 +148,12 @@ async def test_stream_chat_without_schema_sends_no_response_format(tmp_path: Pat
     assert "response_format" not in fake.conversations[0].send_kwargs
 ```
 
-Imports oben in der Testdatei ergänzen: `import json`, `import logging`.
+Import oben in der Testdatei ergänzen: `import logging`.
 
 - [ ] **Step 2: Tests laufen lassen, Fehlschlag prüfen**
 
-Run: `uv run pytest tests/engines/test_litert_engine.py -q -k "schema or response_format"`
-Expected: FAIL — `response_schema` ist kein Feld (`ValidationError: extra`/`AttributeError`), `send_kwargs` ohne `response_format`.
+Run: `uv run pytest tests/engines/test_litert_engine.py -q -k "pattern or response_format"`
+Expected: FAIL — `response_pattern` ist kein Feld (`ValidationError: extra`/`AttributeError`), `send_kwargs` ohne `response_format`.
 
 - [ ] **Step 3: Domain-Feld ergänzen**
 
@@ -253,12 +167,12 @@ class GenerationParams(BaseModel):
     temperature: float = Field(ge=0.0, le=2.0)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     stop: list[str] | None = None
-    # JSON Schema the reply must satisfy. Engines that support constrained
+    # Regex the whole reply must match. Engines that support constrained
     # decoding enforce it; ignored when tools are offered (tool grammar wins).
-    response_schema: dict[str, Any] | None = None
+    response_pattern: str | None = None
 ```
 
-(`Any` ist in `types.py` bereits importiert.)
+
 
 - [ ] **Step 4: Engine erweitern**
 
@@ -267,7 +181,6 @@ In `src/litert_server/engines/litert.py`:
 Import-Zeile ändern zu:
 
 ```python
-import json
 from litert_lm import (
     Backend,
     ConstrainedDecodingConfig,
@@ -290,15 +203,15 @@ ersetzen durch:
         response_format: Any | None = None
         if schema_tools:
             constrained: ConstrainedDecodingConfig | None = ConstrainedDecodingConfig(enable=True)
-            if params.response_schema is not None:
-                log.warning("response_schema ignored: tools take precedence")
-        elif params.response_schema is not None:
+            if params.response_pattern is not None:
+                log.warning("response_pattern ignored: tools take precedence")
+        elif params.response_pattern is not None:
             constrained = ConstrainedDecodingConfig(
                 enable=True, provider=LiteRtLmConstraintProviderType.LL_GUIDANCE
             )
             response_format = ResponseFormat(
-                type=ResponseFormat.Type.JSON_OBJECT,
-                schema_or_pattern=json.dumps(params.response_schema),
+                type=ResponseFormat.Type.REGEX,
+                schema_or_pattern=params.response_pattern,
             )
         else:
             constrained = None
@@ -328,7 +241,7 @@ Expected: alle Tests PASS, ruff/mypy sauber. Falls mypy `ResponseFormat.Type` be
 
 ```bash
 git add src/litert_server/domain/types.py src/litert_server/engines/litert.py tests/engines/test_litert_engine.py
-git commit -m "feat(domain,litert): GenerationParams.response_schema → JSON-schema constrained decoding; tools take precedence
+git commit -m "feat(domain,litert): GenerationParams.response_pattern → regex constrained decoding (LL_GUIDANCE); tools take precedence
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
@@ -692,8 +605,8 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Produces:
 
 ```python
-STAGE_ONE_SCHEMA: dict[str, Any]
-STAGE_ONE_PARAMS: GenerationParams   # max_tokens=128, temperature=0.0, response_schema=STAGE_ONE_SCHEMA
+STAGE_ONE_PATTERN: str               # Regex: {"domains":[…],"areas":[…],"names":[…]} ohne Whitespace, je Liste 0–6 Strings à 1–40 Zeichen
+STAGE_ONE_PARAMS: GenerationParams   # max_tokens=96, temperature=0.0, response_pattern=STAGE_ONE_PATTERN
 
 @dataclass(frozen=True)
 class RelevanceQuery:
@@ -705,7 +618,7 @@ class RelevanceQuery:
 def available_domains(entities: list[Entity]) -> list[str]   # sortiert, eindeutig
 def available_areas(entities: list[Entity]) -> list[str]     # sortiert, eindeutig
 def build_stage_one_turns(question: str, domains: list[str], areas: list[str]) -> list[ChatTurn]
-def parse_stage_one(text: str) -> RelevanceQuery | None
+def parse_stage_one(text: str) -> RelevanceQuery | None   # strippt Whitespace, repariert abgeschnittene Ausgabe, fehlende Listen = leer
 def select_entities(entities: list[Entity], query: RelevanceQuery) -> list[Entity]
 ```
 
@@ -718,9 +631,11 @@ def select_entities(entities: list[Entity], query: RelevanceQuery) -> list[Entit
 
 from __future__ import annotations
 
+import re
+
 from litert_server.services.relevance import (
     STAGE_ONE_PARAMS,
-    STAGE_ONE_SCHEMA,
+    STAGE_ONE_PATTERN,
     RelevanceQuery,
     available_areas,
     available_domains,
@@ -751,11 +666,18 @@ def test_build_stage_one_turns_lists_domains_and_areas_and_question():
     assert turns[1].content == "Welche Lampen sind an?"
 
 
-def test_stage_one_params_force_schema_and_determinism():
+def test_stage_one_params_force_pattern_and_determinism():
     assert STAGE_ONE_PARAMS.temperature == 0.0
-    assert STAGE_ONE_PARAMS.max_tokens == 128
-    assert STAGE_ONE_PARAMS.response_schema == STAGE_ONE_SCHEMA
-    assert set(STAGE_ONE_SCHEMA["required"]) == {"domains", "areas", "names"}
+    assert STAGE_ONE_PARAMS.max_tokens == 96
+    assert STAGE_ONE_PARAMS.response_pattern == STAGE_ONE_PATTERN
+
+
+def test_stage_one_pattern_accepts_compact_json_and_rejects_whitespace():
+    good = '{"domains":["light","switch"],"areas":[],"names":["Rollläden"]}'
+    assert re.fullmatch(STAGE_ONE_PATTERN, good)
+    assert re.fullmatch(STAGE_ONE_PATTERN, '{"domains":[],"areas":[],"names":[]}')
+    assert not re.fullmatch(STAGE_ONE_PATTERN, '{"domains": ["light"],"areas":[],"names":[]}')
+    assert not re.fullmatch(STAGE_ONE_PATTERN, '{"domains":["a]"],"areas":[],"names":[]}')
 
 
 def test_parse_stage_one_lowercases_and_drops_blanks():
@@ -769,6 +691,15 @@ def test_parse_stage_one_returns_none_for_invalid_input():
     assert parse_stage_one("not json") is None
     assert parse_stage_one('["light"]') is None
     assert parse_stage_one('{"domains": "light", "areas": [], "names": []}') is None
+
+
+def test_parse_stage_one_repairs_truncated_output_and_treats_missing_lists_as_empty():
+    # whitespace padding + missing closing brace (JSON-schema-mode failure seen in the spike)
+    q = parse_stage_one('{"domains":["light"],"areas":[]\n\t\n\t')
+    assert q == RelevanceQuery(domains=frozenset({"light"}), areas=frozenset(), names=frozenset())
+    # unterminated string inside a list
+    q = parse_stage_one('{"domains":["climate"],"areas":["Bad')
+    assert q == RelevanceQuery(domains=frozenset({"climate"}), areas=frozenset({"bad"}), names=frozenset())
 
 
 def test_parse_stage_one_empty_lists_is_empty_query():
@@ -820,18 +751,15 @@ from typing import Any
 from litert_server.domain.types import ChatTurn, GenerationParams
 from litert_server.services.ha_prompt import Entity, entity_areas, entity_names
 
-STAGE_ONE_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "domains": {"type": "array", "items": {"type": "string"}},
-        "areas": {"type": "array", "items": {"type": "string"}},
-        "names": {"type": "array", "items": {"type": "string"}},
-    },
-    "required": ["domains", "areas", "names"],
-}
+# Compact JSON without whitespace; LiteRT-LM's JSON-schema mode pads with
+# whitespace forever after an empty list, a tight regex does not (spike
+# 2026-09-16). Strings may not contain quotes, backslashes, brackets or braces.
+_ITEM = r'"[^"\\\n\]\}\[\{]{1,40}"'
+_LIST = rf"\[({_ITEM}(,{_ITEM}){{0,5}})?\]"
+STAGE_ONE_PATTERN = rf'\{{"domains":{_LIST},"areas":{_LIST},"names":{_LIST}\}}'
 
 STAGE_ONE_PARAMS = GenerationParams(
-    max_tokens=128, temperature=0.0, response_schema=STAGE_ONE_SCHEMA
+    max_tokens=96, temperature=0.0, response_pattern=STAGE_ONE_PATTERN
 )
 
 _SYSTEM_TEMPLATE = (
@@ -877,14 +805,36 @@ def _string_set(value: Any) -> frozenset[str] | None:
     return frozenset(v.strip().lower() for v in value if v.strip())
 
 
+def _repair(text: str) -> str:
+    """Close an unterminated string and any open brackets of a truncated reply."""
+    if text.count('"') % 2 == 1:
+        text += '"'
+    closers: list[str] = []
+    for ch in text:
+        if ch in "[{":
+            closers.append("]" if ch == "[" else "}")
+        elif ch in "]}" and closers:
+            closers.pop()
+    return text.rstrip(",") + "".join(reversed(closers))
+
+
+def _load_json_object(text: str) -> dict[str, Any] | None:
+    compact = "".join(text.split())
+    for candidate in (compact, _repair(compact)):
+        try:
+            data = json.loads(candidate)
+        except ValueError:
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
+
+
 def parse_stage_one(text: str) -> RelevanceQuery | None:
-    try:
-        data = json.loads(text)
-    except ValueError:
+    data = _load_json_object(text)
+    if data is None:
         return None
-    if not isinstance(data, dict):
-        return None
-    sets = [_string_set(data.get(key)) for key in ("domains", "areas", "names")]
+    sets = [_string_set(data.get(key, [])) for key in ("domains", "areas", "names")]
     if any(s is None for s in sets):
         return None
     domains, areas, names = sets
@@ -914,7 +864,7 @@ Expected: PASS.
 
 ```bash
 git add src/litert_server/services/relevance.py tests/services/test_relevance.py
-git commit -m "feat(services): stage-1 relevance prompt, schema, parsing and entity selection
+git commit -m "feat(services): stage-1 relevance prompt, regex pattern, lenient parsing and entity selection
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
@@ -1046,7 +996,7 @@ async def test_filters_system_prompt_and_passes_tools_and_params_through():
     assert text == "Die Lampe ist an."
     assert len(inner.chat_calls) == 2
     stage1, stage2 = inner.chat_calls
-    assert stage1.tools is None and stage1.params.response_schema is not None
+    assert stage1.tools is None and stage1.params.response_pattern is not None
     assert stage1.messages[-1].content == QUESTION.content
     assert stage2.tools == TOOLS and stage2.params == PARAMS and stage2.model == "m"
     system = stage2.messages[0].content
@@ -1168,7 +1118,7 @@ Expected: FAIL mit `ModuleNotFoundError: litert_server.services.compaction`.
 Assist prompts before inference (spec 2026-09-16-prompt-compaction-design).
 
 Stage 1 asks the inner engine which domains/areas/names the question needs
-(JSON via ``GenerationParams.response_schema``); stage 2 runs the real turn
+(compact JSON via ``GenerationParams.response_pattern``); stage 2 runs the real turn
 with a filtered system prompt and compacted Live Context tool results. Any
 problem in between yields the untouched messages — never an error.
 """
@@ -1477,7 +1427,7 @@ Am Anfang von `CHANGELOG.md` nach `# Changelog` einfügen:
   compacts only while `context_length` is below 16384. Requests without
   HA's Assist prompt are untouched; any parsing or stage-1 problem falls
   back to the original prompt and logs the reason.
-- `GenerationParams.response_schema`: engines enforce a JSON schema via
+- `GenerationParams.response_pattern`: engines enforce a regex on the reply via
   constrained decoding when no tools are offered.
 ```
 
@@ -1618,4 +1568,4 @@ git push origin main
 
 - **Spec-Abdeckung:** R1 Erkennung → Task 2/4; R2 Dekorator + `__main__` → Task 4/5; R3/R4 Fallbacks und unangetastete Turns → Task 4 (Tests parametrisiert, Tool-Turn-Test); R5 Option/auto → Task 5; R6 Import-Vertrag → Task 2; R7 Testbarkeit ohne Modell → `ScriptedEngine` Task 4. Abschnitt 4 (Stufe-1-Prompt, Schema, Abgleich, Fallbacks, Cache, Spike) → Task 0/3/4. Abschnitt 5 (Rendering, Hinweiszeile, Tool-Kompaktierung, Log-Zeile) → Task 2/4. Abschnitt 6 (Option, Env, Settings, Schema-Feld, Vorrang `tools`, PyYAML, Doku, Version) → Task 1/2/5/6. Abschnitt 7 (Tests, Smoke, Abnahme) → Task 4/7. Abschnitt 8 (Reihenfolge) → Task-Reihenfolge. `collect_chat` für Stufe 1 → Task 4.
 - **Platzhalter:** keine; Spike-Negativpfad ist konkret beschrieben.
-- **Typkonsistenz:** `RelevanceQuery`-Felder als `frozenset[str]` in Task 3 und 4; `Entity = dict[str, Any]`; `compact_live_context(content: str) -> str | None`; `split_static_context(text) -> StaticContext | None`; `compaction_enabled(mode, context_length)`; `STAGE_ONE_PARAMS` mit `response_schema`. Fallback-Gründe in Task 4: `unknown domains` (in `_relevance`) vor `no entity matched` (in `_prepare`); die Test-Parametrisierung folgt dieser Reihenfolge.
+- **Typkonsistenz:** `RelevanceQuery`-Felder als `frozenset[str]` in Task 3 und 4; `Entity = dict[str, Any]`; `compact_live_context(content: str) -> str | None`; `split_static_context(text) -> StaticContext | None`; `compaction_enabled(mode, context_length)`; `STAGE_ONE_PARAMS` mit `response_pattern`. Fallback-Gründe in Task 4: `unknown domains` (in `_relevance`) vor `no entity matched` (in `_prepare`); die Test-Parametrisierung folgt dieser Reihenfolge.

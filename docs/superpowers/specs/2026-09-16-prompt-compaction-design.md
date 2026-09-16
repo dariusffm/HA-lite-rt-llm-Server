@@ -54,8 +54,8 @@ aus bleibt.
 Neue Schicht `services/` neben `engines/`:
 
 ```
-domain/         Typen, Protokolle (unverändert + GenerationParams.response_schema)
-engines/        LiteRTEngine (+ response_format bei gesetztem Schema)
+domain/         Typen, Protokolle (unverändert + GenerationParams.response_pattern)
+engines/        LiteRTEngine (+ response_format REGEX bei gesetztem Pattern)
 services/       CompactingInferenceService — Dekorator um InferenceService
 adapters/       unverändert
 __main__.py     wickelt LiteRTEngine je nach Option in den Dekorator
@@ -70,7 +70,7 @@ Protokoll `InferenceService`:
   2. **Zerlegen.** Systemprompt in Kopf, YAML-Entitätenliste, Rest. Aus der
      Liste vorhandene Domänen, Bereiche, Namen/Aliase sammeln.
   3. **Stufe 1** (Abschnitt 4) über `collect_chat` (`domain/inference.py`)
-     auf `inner` mit Mini-Prompt, ohne Tools, mit JSON-Schema. `collect_chat`
+     auf `inner` mit Mini-Prompt, ohne Tools, mit Regex-Ausgabeformat. `collect_chat`
      sammelt den Stream vollständig, bevor Stufe 2 beginnt; es ist nie ein
      zweiter Streaming-Kanal parallel offen. Cache pro Fragetext.
   4. **Kürzen** (Abschnitt 5): Systemprompt filtern, Live-Context-Tool-Turns
@@ -107,15 +107,21 @@ Return only what the question needs. Use an empty list when unsure.
 (Tool-Ergebnis als letzte Nachricht) bleibt die letzte `user`-Nachricht die
 Referenz.
 
-**Ausgabe:** JSON per Schema, erzwungen über `GenerationParams.response_schema`
-und constrained decoding in der Engine:
+**Ausgabe:** JSON, erzwungen über `GenerationParams.response_pattern` (eine
+Regex, die die Antwort vollständig matchen muss) und constrained decoding
+(LL_GUIDANCE) in der Engine. Spike 2026-09-16: der JSON-Schema-Modus von
+LiteRT-LM füllt nach einer leeren Liste endlos Whitespace (erlaubt durch die
+JSON-Grammatik) und erreicht nie das Ende; eine enge Regex ohne Whitespace mit
+max. 6 Einträgen à 40 Zeichen pro Liste lieferte 8 von 8 Fragen sauber in ~0,6 s:
 
 ```json
 {"domains": ["light"], "areas": ["Bad"], "names": ["Fernseher"]}
 ```
 
-Parameter: `temperature=0.0`, `max_tokens=128`, `tools=None`. Modellname wie
-im Original-Request.
+Parameter: `temperature=0.0`, `max_tokens=96`, `tools=None`. Modellname wie
+im Original-Request. Der Parser strippt Whitespace und repariert abgeschnittene
+Ausgaben (offenen String schließen, offene Klammern schließen, fehlende Listen
+als leer werten), bevor er aufgibt.
 
 **Abgleich** (ODER-verknüpft, bewusst großzügig): Entität bleibt, wenn
 - ihre `domain` in `domains` steht, oder
@@ -133,10 +139,8 @@ im Original-Request.
 **Cache:** `dict[str, StageOneResult]` Fragetext → Ergebnis, max. 64 Einträge,
 FIFO. Kein Ablauf.
 
-**Spike vorab:** Wegwerf-Skript gegen das lokale Modell prüft, ob
-`response_format` + constrained decoding auf CPU gültiges JSON nach Schema
-liefert. Negativ → Stufe 1 fragt nach drei Kommalisten im Klartext, parst
-nachsichtig; `response_schema` entfällt.
+**Spike (erledigt, `docs/benchmarks/2026-09-16-json-schema-spike.md`):**
+JSON-Schema-Modus negativ, Regex-Modus positiv; daher `response_pattern`.
 
 ## 5. Kürzungsregeln
 
@@ -175,12 +179,13 @@ Zeichen statt Tokens zählen.
 - `__main__`: `on` → wickeln; `off` → nicht; `auto` → wickeln, wenn
   `context_length < 16384`. Start-Log:
   `prompt compaction: enabled (auto, context_length 8192)` bzw. `disabled (…)`.
-- `GenerationParams.response_schema: dict[str, Any] | None = None`.
-  `LiteRTEngine.stream_chat` setzt bei gesetztem Schema `response_format` und
-  `ConstrainedDecodingConfig(enable=True)`; die Engine kennt Stufe 1 nicht.
-  **Vorrangregel:** Sind `tools` und `response_schema` gleichzeitig gesetzt,
-  gewinnt `tools` (Tool-Grammatik); `response_schema` wird ignoriert und eine
-  Warnung geloggt. Stufe 1 setzt immer `tools=None`.
+- `GenerationParams.response_pattern: str | None = None` (Regex, die die
+  Antwort vollständig matchen muss). `LiteRTEngine.stream_chat` setzt bei
+  gesetztem Pattern `response_format=ResponseFormat(REGEX, pattern)` und
+  `ConstrainedDecodingConfig(enable=True, provider=LL_GUIDANCE)`; die Engine
+  kennt Stufe 1 nicht. **Vorrangregel:** Sind `tools` und `response_pattern`
+  gleichzeitig gesetzt, gewinnt `tools` (Tool-Grammatik); `response_pattern`
+  wird ignoriert und eine Warnung geloggt. Stufe 1 setzt immer `tools=None`.
 - `pyproject.toml`: `pyyaml` (+ `types-PyYAML` für mypy).
 - `.importlinter`: Vertrag `services` ↛ `engines`, `adapters`,
   `model_registry`, `config`, `litert_lm`, `huggingface_hub`, `fastapi`.
@@ -201,9 +206,9 @@ Zeichen statt Tokens zählen.
 - Cache: gleiche Frage → Stufe 1 nur einmal.
 - Durchreichen: Tools, Modell, Parameter unverändert bei `inner`;
   `stream_completion` Passthrough.
-- Engine: `response_schema` → `response_format` + constrained decoding; ohne
-  Schema nichts davon; mit `tools` und Schema zugleich gewinnt `tools`, Warnung
-  im Log.
+- Engine: `response_pattern` → `response_format` (REGEX) + constrained
+  decoding (LL_GUIDANCE); ohne Pattern nichts davon; mit `tools` und Pattern
+  zugleich gewinnt `tools`, Warnung im Log.
 - Settings/`__main__`: off/on/auto × context_length 8192/16384.
 - Architektur: Import-Linter-Vertrag für `services/`.
 
@@ -217,7 +222,7 @@ auf kleine Menge, Gesamtdauer deutlich unter 4 min. Bericht nach
 
 ## 8. Reihenfolge
 
-Spike JSON-Ausgabe → Engine-Erweiterung → PyYAML + Parser beider Formate →
+Spike Ausgabeformat (erledigt) → Engine-Erweiterung → PyYAML + Parser beider Formate →
 Dekorator mit Filter und Fallbacks → Tool-Kompaktierung → Cache → Option,
 Settings, Verdrahtung → Doku, Version → Rollout und Abnahme → Simplify-Pass.
 
