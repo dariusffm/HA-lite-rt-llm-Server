@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     preload_models: list[str] = []
     tool_calling: bool = True
     context_length: int = 8192
+    prompt_compaction: Literal["off", "on", "auto"] = "auto"
     hf_token: str | None = Field(default=None, validation_alias="HF_TOKEN")
 
     @field_validator("preload_models", mode="before")

@@ -19,6 +19,7 @@ options:
   temperature: 0.7
   tool_calling: true
   context_length: 8192
+  prompt_compaction: auto
   preload_models: []
   hf_token: ""
 schema:
@@ -28,6 +29,7 @@ schema:
   temperature: float(0.0,2.0)
   tool_calling: bool
   context_length: int(2048,32768)
+  prompt_compaction: list(off|on|auto)
   preload_models:
     - str
   hf_token: password?

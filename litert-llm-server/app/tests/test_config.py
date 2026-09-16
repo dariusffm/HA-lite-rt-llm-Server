@@ -65,3 +65,13 @@ def test_context_length_env(monkeypatch):
 def test_context_length_defaults(monkeypatch):
     monkeypatch.delenv("LITERT_CONTEXT_LENGTH", raising=False)
     assert Settings().context_length == 8192
+
+
+def test_prompt_compaction_env(monkeypatch):
+    monkeypatch.setenv("LITERT_PROMPT_COMPACTION", "off")
+    assert Settings().prompt_compaction == "off"
+
+
+def test_prompt_compaction_defaults_auto(monkeypatch):
+    monkeypatch.delenv("LITERT_PROMPT_COMPACTION", raising=False)
+    assert Settings().prompt_compaction == "auto"

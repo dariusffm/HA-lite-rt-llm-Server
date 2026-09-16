@@ -25,8 +25,20 @@ from litert_server.domain.model_registry import ModelRegistry
 from litert_server.engines.litert import LiteRTEngine
 from litert_server.model_registry.filesystem import FilesystemCache
 from litert_server.model_registry.huggingface import HuggingFaceRegistry
+from litert_server.services.compaction import CompactingInferenceService
 
 log = logging.getLogger(__name__)
+
+AUTO_COMPACTION_BELOW = 16384
+
+
+def compaction_enabled(mode: str, context_length: int) -> bool:
+    """``on``/``off`` are explicit; ``auto`` compacts only for small context windows."""
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    return context_length < AUTO_COMPACTION_BELOW
 
 
 def build_app(
@@ -67,7 +79,18 @@ def make_production_app() -> FastAPI:
     settings = Settings()
     cache = FilesystemCache(root=settings.models_dir)
     registry = HuggingFaceRegistry(cache=cache, hf_token=settings.hf_token)
-    engine = LiteRTEngine(models_dir=settings.models_dir, max_num_tokens=settings.context_length)
+    engine: InferenceService = LiteRTEngine(
+        models_dir=settings.models_dir, max_num_tokens=settings.context_length
+    )
+    compacting = compaction_enabled(settings.prompt_compaction, settings.context_length)
+    if compacting:
+        engine = CompactingInferenceService(engine)
+    log.info(
+        "prompt compaction: %s (%s, context_length %d)",
+        "enabled" if compacting else "disabled",
+        settings.prompt_compaction,
+        settings.context_length,
+    )
     log.info("context length: %d", settings.context_length)
     if settings.max_tokens > settings.context_length:
         log.warning(

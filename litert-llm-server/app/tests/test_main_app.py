@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from litert_server.__main__ import build_app
+from litert_server.__main__ import AUTO_COMPACTION_BELOW, build_app, compaction_enabled
 from litert_server.domain.types import ToolCall
 from tests.fakes.fake_engine import FakeEngine
 from tests.fakes.fake_registry import FakeRegistry
@@ -79,3 +79,18 @@ async def test_build_app_tools_disabled_ignores_tools():
         })
     assert engine.chat_calls[-1].tools is None
     assert "tool_calls" not in r.json()["message"]
+
+
+@pytest.mark.parametrize(
+    "mode, context_length, expected",
+    [
+        ("off", 8192, False),
+        ("on", 32768, True),
+        ("auto", 8192, True),
+        ("auto", AUTO_COMPACTION_BELOW - 1, True),
+        ("auto", AUTO_COMPACTION_BELOW, False),
+        ("auto", 32768, False),
+    ],
+)
+def test_compaction_enabled(mode, context_length, expected):
+    assert compaction_enabled(mode, context_length) is expected
