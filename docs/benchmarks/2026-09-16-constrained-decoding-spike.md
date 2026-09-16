@@ -26,3 +26,14 @@ Alle Durchläufe 0,3–0,9 s, kein messbarer Unterschied.
 
 Add-on 0.2.4 setzt `ConstrainedDecodingConfig(enable=True)`, sobald der Client Tools übergibt. Ohne Tools unverändert.
 Die alternative „nachsichtige Reparatur“ des rohen Modell-Outputs aus der Fehlermeldung wurde nicht gebaut.
+
+## Abnahme auf HA (0.2.4, 2026-09-16 ~08:40)
+
+Agent-Anweisung ergänzt: *"When you need entity states, always call GetLiveContext with a domain, name or area filter
+(e.g. domain: light). Never call it without a filter."* Frage im Assist-Chat: „Welche Lampen sind gerade eingeschaltet?“
+
+- Vor 0.2.4 (mit Anweisung): Modell setzte `call:homeassistant__GetLiveContext{domain:light}`, LiteRT-Parser-Fehler,
+  HA „Unexpected error during intent recognition“.
+- Mit 0.2.4: Tool-Aufruf `homeassistant__GetLiveContext {"domain": "light"}`, HA-Ergebnis nur Lampen, Antwort:
+  „Die folgenden Lampen sind gerade eingeschaltet: BalkonKraftwerk switch_0, Ili9341Esp32Kellerbackup ILI9341 Display
+  Backlight“. Beide Runden fehlerfrei, keine Historien-Kürzung nötig, Gesamtdauer ~4 min (CPU-Prefill des 6k-Systemprompts).

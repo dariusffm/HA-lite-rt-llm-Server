@@ -43,7 +43,10 @@ Fall 2 — selbstständig in Automationen (Node-RED), eigene Phase mit Spec:
 - [ ] RAM-Bedarf pro `context_length` messen und dokumentieren (16384 → Prozess auf dem HA-Host nach Modell-Laden gestorben, vermutlich OOM); Schutz: Watchdog an, ggf. Kontext beim Start gegen freien RAM prüfen
 - [ ] `config.yaml` `log_level` erlaubt `critical`, `config.py` `LogLevel` kennt `notice`/`fatal` statt `critical` → Auswahl `critical` in HA schlägt beim Start fehl; Werte angleichen (vorbestehend)
 - [x] `engines/litert.py`: Producer-Thread hängt nicht mehr in `q.put` nach Client-Abbruch; `except: pass` um close()/cancel() loggen jetzt (0.2.3)
-- [x] Kontextüberlauf (`Input token ids are too long`): Engine kürzt die Historie rundenweise und versucht es erneut (0.2.3); Abnahme auf HA mit Geräteabfrage steht aus
+- [x] Kontextüberlauf (`Input token ids are too long`): Engine kürzt die Historie rundenweise und versucht es erneut (0.2.3); auf HA abgenommen
+- [x] Tool-Aufrufe mit constrained decoding (0.2.4): behebt `Failed to parse tool calls` bei unquotierten Argumenten; Lampenfrage mit `GetLiveContext{domain: light}` auf HA abgenommen
+- [ ] Nächste Phase (Brainstorming): Kontext klein halten bei voller Freigabe — Systemprompt im Add-on nach der Frage vorfiltern (mehrstufig: erst Domänen/Bereiche bestimmen, dann gekürzter Prompt), Fallback unverändert durchreichen; Tool-Ergebnisse kompakt; Recherche in `docs/benchmarks/2026-09-16-ha-llm-filter-research.md`
+- [ ] Entitäten-Freigabe einmal kuratieren: Einträge ohne sprechbaren Namen (Hex-IDs, Zelltemperaturen) entfernen; alles Sprechbare inkl. Sensoren bleibt
 - [ ] `/v1/completions` ignoriert `stream: true` und antwortet immer non-stream (vorbestehend)
 - [ ] Ollama `options.num_ctx` wird ignoriert (HA-Agent steht jetzt auf 16384 wie `context_length`); Warnung im Log, wenn ein Client mehr Kontext anfragt als `context_length` (Beobachtbarkeit, aus dem Simplify-Pass vertagt)
 - [ ] `FakeEngine` hat drei Schalter (`tool_calls`, `raise_error`, `raise_after`) mit impliziter Priorität; beim nächsten Umbau auf ein einzelnes Skript `list[Token | Exception]` umstellen
