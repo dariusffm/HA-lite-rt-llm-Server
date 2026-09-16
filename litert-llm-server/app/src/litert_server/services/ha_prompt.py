@@ -16,7 +16,11 @@ import yaml
 
 STATIC_MARKER = "Static Context: An overview of the areas and the devices in this smart home:"
 LIVE_MARKER = "Live Context: An overview"
-FILTER_NOTE = "Only entities relevant to the current question are listed."
+FILTER_NOTE = (
+    "Only entities relevant to the current question are listed. When calling "
+    "GetLiveContext use the domain shown for the entity: temperature, humidity, "
+    "prices and other readings are domain sensor, not climate."
+)
 _COMPACT_HEADER = "Live Context (compact):"
 
 Entity = dict[str, Any]

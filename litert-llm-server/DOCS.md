@@ -75,6 +75,8 @@ Home Assistant's `GetLiveContext` tool accepts optional `domain`, `name` and
 line like *"When you need entity states, always call GetLiveContext with a
 domain, name or area filter. Never call it without a filter."* to the agent's
 instructions so tool results stay small.
+With `prompt_compaction` active the add-on adds this hint itself, including
+the rule that readings (temperature, humidity, prices) are domain `sensor`.
 
 Home Assistant's agent option *Größe des Kontextfensters* (`num_ctx`) must
 not exceed the add-on's `context_length`; the add-on ignores `num_ctx`. With

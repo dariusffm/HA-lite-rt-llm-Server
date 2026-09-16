@@ -120,3 +120,9 @@ def test_split_static_context_returns_none_for_unexpected_line_before_yaml():
         HEAD + STATIC_MARKER + "\nSome other text\n- names: Wohnzimmer Lampe\n  domain: light\n"
     )
     assert split_static_context(prompt_with_foreign_text) is None
+
+
+def test_filter_note_is_one_line_and_names_sensor_domain():
+    # One line: _split_yaml_block skips the note by exact line match.
+    assert "\n" not in FILTER_NOTE
+    assert "domain sensor" in FILTER_NOTE

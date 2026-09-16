@@ -45,7 +45,9 @@ Fall 2 — selbstständig in Automationen (Node-RED), eigene Phase mit Spec:
 - [x] `engines/litert.py`: Producer-Thread hängt nicht mehr in `q.put` nach Client-Abbruch; `except: pass` um close()/cancel() loggen jetzt (0.2.3)
 - [x] Kontextüberlauf (`Input token ids are too long`): Engine kürzt die Historie rundenweise und versucht es erneut (0.2.3); auf HA abgenommen
 - [x] Tool-Aufrufe mit constrained decoding (0.2.4): behebt `Failed to parse tool calls` bei unquotierten Argumenten; Lampenfrage mit `GetLiveContext{domain: light}` auf HA abgenommen
-- [ ] Nächste Phase (Brainstorming): Kontext klein halten bei voller Freigabe — Systemprompt im Add-on nach der Frage vorfiltern (mehrstufig: erst Domänen/Bereiche bestimmen, dann gekürzter Prompt), Fallback unverändert durchreichen; Tool-Ergebnisse kompakt; Recherche in `docs/benchmarks/2026-09-16-ha-llm-filter-research.md`
+- [x] Prompt-Kürzung `prompt_compaction` (off|on|auto), 0.3.0–0.3.2: Stufe 1 bestimmt Domänen/Bereiche/Namen, Systemprompt gefiltert (176→51 auf HA), Live-Context kompakt, Fallbacks; Spec `docs/superpowers/specs/2026-09-16-prompt-compaction-design.md`, Abnahme `docs/benchmarks/2026-09-16-prompt-compaction-e2e.md`
+- [ ] Engine-Semaphore: Stufe 1 und Hauptaufruf teilen den Single-Slot-Engine; parallele Anfragen (zwei Agenten, Node-RED) können sich kreuzen (Spec §3/§9)
+- [ ] Beobachtete Fehlwahl von Gemma 4 E2B: `climate` statt `sensor` für Temperatur/Spritpreis; 0.3.2 gibt den Hinweis in der Kürzungsnotiz — auf HA nachprüfen, sonst Stufe-1-Auswahl um Domänen-Synonyme ergänzen
 - [ ] Entitäten-Freigabe einmal kuratieren: Einträge ohne sprechbaren Namen (Hex-IDs, Zelltemperaturen) entfernen; alles Sprechbare inkl. Sensoren bleibt
 - [ ] `/v1/completions` ignoriert `stream: true` und antwortet immer non-stream (vorbestehend)
 - [ ] Ollama `options.num_ctx` wird ignoriert (HA-Agent steht jetzt auf 16384 wie `context_length`); Warnung im Log, wenn ein Client mehr Kontext anfragt als `context_length` (Beobachtbarkeit, aus dem Simplify-Pass vertagt)

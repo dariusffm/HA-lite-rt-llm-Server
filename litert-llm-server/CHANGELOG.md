@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2 — 2026-09-16
+
+- The note the add-on writes into a compacted Assist prompt now tells the
+  model to call `GetLiveContext` with the entity's listed domain and that
+  temperature, humidity, prices and other readings are domain `sensor`.
+  Gemma 4 E2B otherwise asks for `climate` and Home Assistant finds nothing.
+
 ## 0.3.1 — 2026-09-16
 
 - The `log_level` option now applies to the add-on's own loggers. Previously
