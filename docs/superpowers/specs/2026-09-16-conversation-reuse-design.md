@@ -153,6 +153,8 @@ auf den letzten werden angehängt, der letzte per `send_message_async`.
 Falls nein, bleibt die Ein-Turn-Regel. Ergebnis in die Spec eintragen
 (dieser Abschnitt), nicht raten.
 
+**Ergebnis (2026-09-16, litert-lm-api 0.17.0):** `Conversation` bietet keine API zum Anhängen ohne Antwort (öffentliche Methoden: `cancel_process`, `close`, `get_benchmark_info`, `get_debug_artifacts`, `render_message_to_string`, `send_message`, `send_message_async`, `token_count`). Bedingung §5.4 (genau ein neuer Turn) bleibt in 0.4.0 bestehen; keine Lockerung möglich.
+
 ## 8. Lebenszyklus und Invalidierung
 
 | Ereignis | Wirkung auf die gehaltene Conversation |
