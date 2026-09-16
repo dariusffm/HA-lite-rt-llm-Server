@@ -66,9 +66,15 @@ restarted automatically.
 Set `tool_calling: false` to ignore all tools: replies are plain text as in
 0.1.x, even if the agent has Assist or MCP tools enabled.
 
-Small models (Gemma 4 E2B) sometimes emit malformed tool arguments; Home
-Assistant repairs common cases. Keep the number of exposed entities small to
-save context.
+Tool calls are generated with constrained decoding, so the model cannot emit
+malformed arguments (0.2.4). Keep the number of exposed entities small to save
+context.
+
+Home Assistant's `GetLiveContext` tool accepts optional `domain`, `name` and
+`area` filters (HA 2026.9+). Gemma 4 E2B only uses them when told to; add a
+line like *"When you need entity states, always call GetLiveContext with a
+domain, name or area filter. Never call it without a filter."* to the agent's
+instructions so tool results stay small.
 
 Home Assistant's agent option *Größe des Kontextfensters* (`num_ctx`) must
 not exceed the add-on's `context_length`; the add-on ignores `num_ctx`. With

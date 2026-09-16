@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.4 — 2026-09-16
+
+- Tool calls are now generated with LiteRT-LM constrained decoding whenever
+  the client passes tools. Gemma 4 E2B otherwise emits arguments the
+  library's grammar rejects (e.g. `{domain:light}` without quotes), which
+  surfaced as `Failed to parse tool calls from code block` and an
+  "Unexpected error during intent recognition" in Home Assistant. Plain-text
+  replies and speed are unaffected.
+
 ## 0.2.3 — 2026-09-16
 
 - Chat requests whose prompt exceeds `context_length` no longer fail with

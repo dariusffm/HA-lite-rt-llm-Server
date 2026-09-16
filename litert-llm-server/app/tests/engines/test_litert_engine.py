@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from litert_server.domain.types import ChatTurn, GenerationParams, ToolCall
+from litert_server.domain.types import ChatTurn, GenerationParams, ToolCall, ToolSpec
 from litert_server.engines.litert import LiteRTEngine, _drop_oldest_exchange
 
 
@@ -94,7 +94,7 @@ class _FakeLiteRTEngine:
         self.limit = limit
         self.preface_sizes: list[int] = []
 
-    def create_conversation(self, *, messages, tools, automatic_tool_calling, sampler_config):
+    def create_conversation(self, *, messages, **_kw):
         return _FakeConversation(len(messages or []), self.limit, self.preface_sizes)
 
 
@@ -149,3 +149,38 @@ async def test_stream_chat_does_not_retry_once_tokens_were_emitted(tmp_path: Pat
 
     assert got == ["partial"]
     assert fake.preface_sizes == [3]
+
+
+# --- constrained decoding for tool calls -------------------------------------
+
+
+class _RecordingLiteRTEngine(_FakeLiteRTEngine):
+    def __init__(self) -> None:
+        super().__init__(limit=99)
+        self.kwargs: list[dict] = []
+
+    def create_conversation(self, **kw):
+        self.kwargs.append(kw)
+        return _FakeConversation(len(kw["messages"] or []), self.limit, self.preface_sizes)
+
+
+async def test_stream_chat_enables_constrained_decoding_when_tools_are_given(tmp_path: Path):
+    fake = _RecordingLiteRTEngine()
+    engine = _loaded_engine(tmp_path, fake)
+    tools = [ToolSpec(name="GetLiveContext", description="d", parameters={"type": "object"})]
+
+    async for _ in engine.stream_chat("m", [_sys(), _user(1)], _PARAMS, tools=tools):
+        pass
+
+    cfg = fake.kwargs[0]["constrained_decoding_config"]
+    assert cfg is not None and cfg.enable is True
+
+
+async def test_stream_chat_leaves_constrained_decoding_off_without_tools(tmp_path: Path):
+    fake = _RecordingLiteRTEngine()
+    engine = _loaded_engine(tmp_path, fake)
+
+    async for _ in engine.stream_chat("m", [_sys(), _user(1)], _PARAMS):
+        pass
+
+    assert fake.kwargs[0]["constrained_decoding_config"] is None

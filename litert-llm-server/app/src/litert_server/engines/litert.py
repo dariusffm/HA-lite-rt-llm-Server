@@ -10,7 +10,7 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Any
 
-from litert_lm import Backend, Engine, SamplerConfig
+from litert_lm import Backend, ConstrainedDecodingConfig, Engine, SamplerConfig
 from litert_lm.interfaces import Tool
 
 from litert_server.domain.types import (
@@ -313,6 +313,12 @@ class LiteRTEngine:
         preface = list(messages[:-1])
         last = _turn_to_litert(messages[-1])
         schema_tools = [_SchemaTool(t) for t in tools] if tools else None
+        # Without constrained decoding Gemma 4 E2B emits tool-call arguments
+        # the litert_lm grammar rejects (unquoted strings such as
+        # ``{domain:light}``), which surfaces as an engine error instead of a
+        # tool call. Constraining generation to the tool grammar fixes this
+        # and leaves plain-text replies untouched (spike 2026-09-16).
+        constrained = ConstrainedDecodingConfig(enable=True) if schema_tools else None
         sampler = self._build_sampler(params)
         active: list[Any] = []  # the conversation currently decoding, for cancel
 
@@ -322,6 +328,7 @@ class LiteRTEngine:
                 tools=schema_tools,
                 automatic_tool_calling=False,
                 sampler_config=sampler,
+                constrained_decoding_config=constrained,
             )
             active[:] = [conversation]
             return conversation
