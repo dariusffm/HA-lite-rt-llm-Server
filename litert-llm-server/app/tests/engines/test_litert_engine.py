@@ -685,3 +685,17 @@ async def test_abort_after_producer_finished_still_closes(tmp_path: Path):
     await stream.aclose()
 
     assert fake.conversations[0].closed == 1
+
+
+async def test_dropped_raw_chunks_are_logged_at_debug(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    thought = {"role": "assistant", "content": [{"type": "thought", "text": "hmm"}]}
+    engine, _fake = _reuse_engine(tmp_path, [[thought, *_TEXT]])
+    caplog.set_level(logging.DEBUG, logger="litert_server.engines.litert")
+
+    out = await _drain(engine, [_sys(), _user(1)])
+
+    assert "".join(t.text for t in out) == "ok"
+    assert "raw chunk 1 dropped" in caplog.text
+    assert "'thought'" in caplog.text

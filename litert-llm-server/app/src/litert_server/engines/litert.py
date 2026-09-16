@@ -604,17 +604,26 @@ class LiteRTEngine:
         def stream_reply(conversation: Any, message: dict[str, Any], q: _TokenQueue) -> bool:
             """Feed one reply into the queue; True once any token was emitted."""
             emitted = False
+            raw = 0
             for chunk in conversation.send_message_async(message, **send_kwargs):
+                raw += 1
                 calls = _extract_tool_calls(chunk) if tools else None
                 if calls:
                     reply_calls.extend(calls)
                     q.put(calls)
                     return True
-                for piece in _extract_text(chunk):
-                    if piece:
-                        reply_parts.append(piece)
-                        q.put(piece)
-                        emitted = True
+                pieces = [piece for piece in _extract_text(chunk) if piece]
+                if not pieces:
+                    # Chunks without text or tool call never reach the queue,
+                    # so a decode that only produces them looks like silence
+                    # from the outside; show the first few and then a sample.
+                    if raw <= 3 or raw % 50 == 0:
+                        log.debug("raw chunk %d dropped (no text/tool call): %.300r", raw, chunk)
+                    continue
+                for piece in pieces:
+                    reply_parts.append(piece)
+                    q.put(piece)
+                    emitted = True
             return emitted
 
         def producer(q: _TokenQueue) -> None:

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.4 — 2026-09-16
+
+- Diagnostics: chunks from `send_message_async` that carry neither text nor
+  a tool call (e.g. thinking content) are now logged at DEBUG (first three,
+  then every 50th) so a decode that produces only such chunks no longer
+  looks like silence. Found on a HA host where a tool round timed out after
+  120 s with zero visible chunks.
+
 ## 0.4.3 — 2026-09-16
 
 - Diagnostics: the engine now logs generation timing at DEBUG (start,
