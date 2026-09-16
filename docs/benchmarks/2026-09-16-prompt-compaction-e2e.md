@@ -1,4 +1,4 @@
-# E2E — Prompt Compaction (Add-on 0.3.0–0.3.2) auf Home Assistant
+# E2E — Prompt Compaction (Add-on 0.3.0–0.3.3) auf Home Assistant
 
 **Datum:** 2026-09-16  **Host:** HAOS `homek` (HA Core 2026.9.2), Add-on `83680c0c_litert_llm_server`, Modell `gemma-4-e2b`,
 `context_length` 8192, `prompt_compaction` auto (aktiv), 176 freigegebene Entitäten.
@@ -48,3 +48,15 @@ HA-Agent: Kontextfenster 8192, Max. Verlauf 6, Anweisung „always call GetLiveC
 
 **Hebel (HA-Kuratierung, kein Add-on-Code):** die vier Bad-Entitäten dem Bereich „Bad“ zuordnen; den gewünschten
 Spritpreis-Sensor für Assist freigeben. Danach beide Fragen wiederholen.
+
+## Nachtest mit 0.3.3 und Agent-Anweisung „After a successful action reply with one short sentence and call no further tools.“
+
+| Frage | Compaction-Log | Tool-Aufruf | Ergebnis |
+|---|---|---|---|
+| Ich brauche die Wohnzimmer-Fenster-Lampe doch noch, mach sie bitte wieder an (Modell kalt nach Neustart) | R1 `entities 176→30, tool turns compacted 0, stage-1 13.2s (miss)`; R2 `tool turns compacted 1, stage-1 0.0s (hit)` | R1: `GetLiveContext{domain: light, area: Wohnzimmer}` (Lampe hat keinen Bereich → nicht im Ergebnis); R2: kam nicht zu Ende | HA: „Timeout running pipeline“ nach 300 s. **Nicht geschaltet.** |
+
+- Erstmals auf HA ein kompaktiertes Live-Context-Ergebnis (R2). Die Kürzung selbst arbeitet wie spezifiziert.
+- Die Agent-Anweisung greift erst nach einer Aktion; hier schaute das Modell zuerst nach und erreichte die Aktion nie.
+- Schon zwei Runden überschreiten bei kaltem Modell die 300 s. Ursache ist der volle Prefill pro Runde (Systemprompt,
+  Tool-Definitionen, Verlauf), nicht die Entitätenzahl. Konsequenz: Schalten über das Modell ist erst mit
+  Conversation-Wiederverwendung zuverlässig (Spike: `2026-09-16-conversation-reuse-spike.md`, Runde 2 in 0,3 s statt 19,6 s lokal).
