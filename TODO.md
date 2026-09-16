@@ -49,6 +49,7 @@ Spike: `docs/benchmarks/2026-09-16-conversation-reuse-spike.md` — Runde 2 loka
 
 ## Offen daneben
 
+- [ ] Codex über ccr (`ccr default-codex -- exec …`, lokal `ollama/qwen3.8:27b`) als Implementierer: erster Versuch scheiterte an `apply_patch invoked with incompatible payload` (Modell erzeugt ungültige Patch-Payloads). Recherche: Codex-Konfiguration für lokale Modelle (`~/.codex/config.toml`: Werkzeugform für apply_patch/Freitext vs. Funktion, `features`, `model_reasoning_effort`, kürzere Briefs, evtl. anderes Ollama-Modell); Nutzer nutzt dieselbe Kombination in einem anderen Projekt erfolgreich
 - [ ] RAM-Bedarf pro `context_length` messen und dokumentieren (16384 → Prozess auf dem HA-Host nach Modell-Laden gestorben, vermutlich OOM); Schutz: Watchdog an, ggf. Kontext beim Start gegen freien RAM prüfen
 - [ ] `config.yaml` `log_level` erlaubt `critical`, `config.py` `LogLevel` kennt `notice`/`fatal` statt `critical` → Auswahl `critical` in HA schlägt beim Start fehl; Werte angleichen (vorbestehend)
 - [x] `engines/litert.py`: Producer-Thread hängt nicht mehr in `q.put` nach Client-Abbruch; `except: pass` um close()/cancel() loggen jetzt (0.2.3)
