@@ -36,6 +36,40 @@ a **Conversation agent** and pick the model (e.g. `gemma-4-e2b`).
 *Home Assistant's "OpenAI Conversation" integration has no base-URL option and
 cannot be pointed at this add-on.*
 
+### Recommended agent settings
+
+Open the agent's options (gear icon on the Ollama integration page). These
+values were tested with HA 2026.9 and `gemma-4-e2b` on a CPU-only host:
+
+| Option | Value | Why |
+|---|---|---|
+| Modell | `gemma-4-e2b` | Native tool calling, 32k context, 2.6 GB. |
+| Home Assistant steuern → Assist | on | Lets the model see and control exposed entities. |
+| Größe des Kontextfensters | same as the add-on's `context_length` (default 8192) | The add-on ignores `num_ctx`; a larger value only hides the real limit. |
+| Max. Nachrichten im Verlauf | 6 | HA resends the whole history each turn; more history means more prefill per turn. |
+| Anweisungen | text below | Gemma 4 E2B needs explicit rules for filtered tool calls and short replies. |
+
+Instructions to paste (English works best with Gemma):
+
+```
+You are a voice assistant for Home Assistant.
+Answer questions about the world truthfully.
+Respond simply and to the point in plain text.
+When you need entity states, always call GetLiveContext with a domain, name or area filter (e.g. domain: light). Never call it without a filter.
+After a successful action reply with one short sentence and call no further tools.
+```
+
+The last line matters: Home Assistant aborts an Assist run after 300 s
+("Timeout running pipeline", not configurable in the UI). Every tool round
+costs a full prefill of system prompt, tool definitions and history (about
+80 s on the test host), so a third round hits the limit. Actions already
+executed stay executed; only the closing sentence is lost.
+
+Entities are found by **area** and **domain** filters only if they are
+assigned in HA (Settings → Areas, and Settings → Voice assistants → Expose).
+A temperature sensor without an area is invisible to "How warm is it in the
+bathroom?" whatever the model asks for.
+
 ### Tool calling (control your home, web search)
 
 Tool calling is on by default (`tool_calling: true`). The add-on never
@@ -71,16 +105,13 @@ malformed arguments (0.2.4). Keep the number of exposed entities small to save
 context.
 
 Home Assistant's `GetLiveContext` tool accepts optional `domain`, `name` and
-`area` filters (HA 2026.9+). Gemma 4 E2B only uses them when told to; add a
-line like *"When you need entity states, always call GetLiveContext with a
-domain, name or area filter. Never call it without a filter."* to the agent's
-instructions so tool results stay small.
-With `prompt_compaction` active the add-on adds this hint itself, including
-the rule that readings (temperature, humidity, prices) are domain `sensor`.
+`area` filters (HA 2026.9+, AND-combined). Gemma 4 E2B only uses them when
+told to; see the instructions under *Recommended agent settings*. With
+`prompt_compaction` active the add-on adds this hint itself, including the
+rule that readings (temperature, humidity, prices) are domain `sensor`.
 
-Home Assistant's agent option *Größe des Kontextfensters* (`num_ctx`) must
-not exceed the add-on's `context_length`; the add-on ignores `num_ctx`. With
-many exposed entities raise `context_length` (more RAM).
+With many exposed entities either keep `prompt_compaction` on or raise
+`context_length` (more RAM).
 
 ## Using with Node-RED
 
