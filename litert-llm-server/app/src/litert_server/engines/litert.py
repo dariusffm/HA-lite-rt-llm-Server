@@ -585,6 +585,16 @@ class LiteRTEngine:
         # producer finished cleanly but the client left before the consumer
         # read the sentinel: nothing would otherwise close the conversation.
         producer_done = Event()
+        close_lock = Lock()
+        closed_ids: set[int] = set()
+
+        def close_once(conversation: Any) -> None:
+            """Close ``conversation`` exactly once, whichever thread gets here first."""
+            with close_lock:
+                if id(conversation) in closed_ids:
+                    return
+                closed_ids.add(id(conversation))
+            _close_quietly(conversation)
 
         def open_conversation(turns: list[ChatTurn]) -> Any:
             conversation = engine.create_conversation(
@@ -639,9 +649,14 @@ class LiteRTEngine:
                     # error reaches here, this thread is done iterating
                     # ``send_message_async``, so closing now can never race
                     # it. The event-loop thread only detaches afterwards.
-                    _close_quietly(conversation)
+                    close_once(conversation)
                     raise
                 producer_done.set()
+                if q.consumer_gone.is_set():
+                    # The client left (or the budget ran out) while we were
+                    # still decoding and the C layer unwound normally after
+                    # cancel: the loop thread has already passed on closing.
+                    close_once(conversation)
                 return
             log.debug("generation started (fresh, %d prompt turns)", len(messages))
             turns = preface
@@ -663,7 +678,7 @@ class LiteRTEngine:
                         and not q.consumer_gone.is_set()
                     )
                     shorter = _drop_oldest_exchange(turns) if retriable else None
-                    _close_quietly(conversation)
+                    close_once(conversation)
                     if shorter is None:
                         raise
                     dropped += len(turns) - len(shorter)
@@ -675,9 +690,11 @@ class LiteRTEngine:
                     turns = shorter
                     continue
                 except BaseException:
-                    _close_quietly(conversation)
+                    close_once(conversation)
                     raise
                 producer_done.set()
+                if q.consumer_gone.is_set():
+                    close_once(conversation)
                 used_turns[:] = [*turns, messages[-1]]
                 return
 
@@ -713,7 +730,7 @@ class LiteRTEngine:
                 # the producer is provably done, otherwise its own except
                 # clause closes it.
                 if finished or producer_done.is_set():
-                    _close_quietly(conversation)
+                    close_once(conversation)
             elif should_hold:
                 reply = ChatTurn(
                     role="assistant",
@@ -745,11 +762,11 @@ class LiteRTEngine:
                     # client left before the sentinel was read) — closing
                     # here cannot race a producer that has already returned.
                     if producer_done.is_set():
-                        _close_quietly(conversation)
+                        close_once(conversation)
             else:
                 # Same as above: only close once the producer is provably
                 # done (finished, or returned normally per producer_done) —
                 # otherwise its own except clause above closes it, and
                 # closing here too would race that still-live iteration.
                 if finished or producer_done.is_set():
-                    _close_quietly(conversation)
+                    close_once(conversation)

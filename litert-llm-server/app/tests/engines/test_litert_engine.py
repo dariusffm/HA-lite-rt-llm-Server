@@ -699,3 +699,47 @@ async def test_dropped_raw_chunks_are_logged_at_debug(
     assert "".join(t.text for t in out) == "ok"
     assert "raw chunk 1 dropped" in caplog.text
     assert "'thought'" in caplog.text
+
+
+class _CancelReturnsConversation(_ReuseConversation):
+    """Like litert_lm: ``send_message_async`` yields nothing until
+    ``cancel_process`` is called, then returns normally (the C layer reports
+    CANCELLED and the generator just ends)."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._cancel = threading.Event()
+
+    def send_message_async(self, last, **kwargs):
+        self.sent.append(last)
+        self._cancel.wait(5.0)
+        time.sleep(0.2)  # the C layer takes a moment to unwind after CANCELLED
+        return
+        yield  # pragma: no cover - makes this a generator
+
+    def cancel_process(self) -> None:
+        super().cancel_process()
+        self._cancel.set()
+
+
+class _CancelReturnsEngine(_ReuseEngine):
+    def create_conversation(self, *, messages, **_kw):
+        conv = _CancelReturnsConversation(self.replies, list(messages or []))
+        self.conversations.append(conv)
+        return conv
+
+
+async def test_timeout_closes_conversation_that_ends_normally_after_cancel(tmp_path: Path):
+    fake = _CancelReturnsEngine([[]])
+    engine = LiteRTEngine(models_dir=tmp_path, conversation_ttl=300.0, generation_timeout=0.3)
+    engine._engine = fake
+    engine.current_model = "m"
+
+    with pytest.raises(RuntimeError, match="generation timed out"):
+        await _drain(engine, [_sys(), _user(1)])
+    await asyncio.sleep(0.3)  # let the producer thread notice the cancel and return
+
+    conv = fake.conversations[0]
+    assert conv.cancelled >= 1
+    assert conv.closed == 1, "producer returned normally after the abort: nobody closed"
+    assert engine._held is None
