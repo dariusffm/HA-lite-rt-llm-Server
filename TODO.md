@@ -38,14 +38,13 @@ Fall 2 — selbstständig in Automationen (Node-RED), eigene Phase mit Spec:
 - [ ] Offene Entscheidung des Users: welche Geräteklassen darf das Modell ohne Rückfrage schalten (Licht? Steckdosen?), welche nur mit Bestätigung (Heizung, Schlösser, Tore, Rollläden)?
 - [ ] Wetter/Nachrichten in Node-RED: Wetter-/News-API als Tool im Subflow anbinden
 
-## Nächste Phase: Conversation-Wiederverwendung über Tool-Runden (Spike positiv, 2026-09-16)
+## Conversation-Wiederverwendung (0.4.0, abgeschlossen 2026-09-16)
 
-Spike: `docs/benchmarks/2026-09-16-conversation-reuse-spike.md` — Runde 2 lokal 19,6 s (frische Conversation) vs. 0,3 s (wiederverwendet); auf dem HA-Host entspricht das ~80 s → Sekunden pro Folgerunde und löst den 300-s-Pipeline-Timeout strukturell.
-- [ ] Brainstorming + Spec: `LiteRTEngine` hält pro geladenem Modell die letzte `Conversation` samt gesendeten Nachrichten; ist die neue Anfrage eine strukturelle Fortsetzung (gleiche Nachrichten + unsere Assistant-Antwort + Tool-Ergebnisse; Tool-Calls über Name + geparste Argumente vergleichen, nicht Text), werden nur die neuen Turns per `send_message_async` angehängt (Tool-Ergebnis als `{"role": "tool", "content": [{"type": "tool_response", …}]}`)
-- [ ] Frische Conversation, wenn: Sampler-/Constrained-Decoding-Konfiguration abweicht (ist bei `create_conversation` fixiert), Kontextüberlauf-Retry, Modellwechsel (`Engine.close()`), Stufe-1-Aufruf (eigene kurze Conversation)
-- [ ] Zusammenspiel mit `prompt_compaction`: der gekürzte Systemprompt muss über die Runden identisch bleiben (Cache-Treffer in Stufe 1), sonst greift die Wiederverwendung nie
-- [ ] Vorbehalt aus dem Spike prüfen: mit synthetischem 260-Entitäten-Prompt lieferte E2B in Runde 2 leere Antworten (frisch wie wiederverwendet); mit echtem HA-Prompt gegentesten
-- [ ] Ressourcen: nur eine gehaltene Conversation pro Modell, `close()` beim Verwerfen; Abnahme auf HA: Schaltbefehl mit Abschlussantwort unter 300 s, Lampenfrage deutlich unter 2,5 min
+Spec `docs/superpowers/specs/2026-09-16-conversation-reuse-design.md`, Plan `docs/superpowers/plans/2026-09-16-conversation-reuse.md`, Abnahme `docs/benchmarks/2026-09-16-conversation-reuse-e2e.md`.
+- [x] Engine hält die letzte Conversation, hängt Fortsetzungen an (Tool-Runden und Folgefragen), Option `conversation_ttl`; auf HA: Folgerunden `appended 1 turn`, kein Pipeline-Timeout mehr
+- [ ] Schalten über das Modell scheitert weiter an Gemma: `HassTurnOn` ohne `name` → `MatchFailedError`. Hebel: Wohnzimmer-Fenster-Lampe dem Bereich Wohnzimmer zuordnen; Agent-Anweisung „Call HassTurnOn/HassTurnOff with the entity name the user said“; später Tool-Argument-Reparatur im Add-on (bekannten Entitätsnamen aus der Frage ergänzen)
+- [ ] Mehrere neue Turns (parallele Tool-Ergebnisse) laufen frisch, litert_lm 0.17 kann nichts ohne Antwort anhängen (Spec §7); bei neuer litert_lm-Version erneut prüfen
+- [ ] Cache-Schlüssel der Kürzung nicht nach Modell getrennt (Minor aus dem 0.3.x-Review); Engine-Semaphore weiter offen
 
 ## Offen daneben
 
