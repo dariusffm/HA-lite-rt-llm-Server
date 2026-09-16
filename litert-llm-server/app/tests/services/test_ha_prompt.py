@@ -112,3 +112,11 @@ def test_compact_live_context_returns_none_for_other_tool_results():
 
 def test_compact_live_context_returns_none_for_broken_yaml():
     assert compact_live_context("Live Context: An overview…\n- names: [oops\n") is None
+
+
+def test_split_static_context_returns_none_for_unexpected_line_before_yaml():
+    # Marker followed by unexpected text (not FILTER_NOTE, not blank) before the YAML block
+    prompt_with_foreign_text = (
+        HEAD + STATIC_MARKER + "\nSome other text\n- names: Wohnzimmer Lampe\n  domain: light\n"
+    )
+    assert split_static_context(prompt_with_foreign_text) is None

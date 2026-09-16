@@ -57,23 +57,24 @@ def _parse_entity_list(block: str) -> list[Entity] | None:
 
 def _split_yaml_block(lines: list[str]) -> tuple[list[str], list[str]]:
     """Take leading lines that belong to a YAML list (items, continuations,
-    blanks); return (block, rest). Skips any non-YAML lines before the block."""
-    # Skip non-YAML lines until we find the start of the YAML block
-    start_idx = 0
-    for i, line in enumerate(lines):
-        if line.startswith("- "):
-            start_idx = i
-            break
-    else:
-        # No YAML block found
-        return [], lines
-
+    blanks); return (block, rest). Skips only blank lines and FILTER_NOTE before the block."""
     block: list[str] = []
-    for i, line in enumerate(lines[start_idx:], start=start_idx):
+    i = 0
+
+    # Skip leading blank lines and FILTER_NOTE
+    while i < len(lines) and (lines[i] == "" or lines[i] == FILTER_NOTE):
+        i += 1
+
+    # Collect the YAML block
+    for j in range(i, len(lines)):
+        line = lines[j]
         if line == "" or line.startswith("- ") or line.startswith(" "):
             block.append(line)
-            continue
-        return block, lines[i:]
+        else:
+            # Non-YAML line found
+            return block, lines[j:]
+
+    # All remaining lines were part of the block (or empty)
     return block, []
 
 
