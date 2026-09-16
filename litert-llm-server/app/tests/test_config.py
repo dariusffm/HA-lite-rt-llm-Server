@@ -100,3 +100,13 @@ def test_conversation_ttl_rejects_out_of_range(monkeypatch):
     monkeypatch.setenv("LITERT_CONVERSATION_TTL", "-1")
     with pytest.raises(ValidationError):
         Settings()
+
+
+def test_tool_call_repair_env_false(monkeypatch):
+    monkeypatch.setenv("LITERT_TOOL_CALL_REPAIR", "false")
+    assert Settings().tool_call_repair is False
+
+
+def test_tool_call_repair_defaults_true(monkeypatch):
+    monkeypatch.delenv("LITERT_TOOL_CALL_REPAIR", raising=False)
+    assert Settings().tool_call_repair is True

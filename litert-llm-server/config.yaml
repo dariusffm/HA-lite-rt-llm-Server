@@ -1,5 +1,5 @@
 name: "LiteRT LLM Server"
-version: "0.4.0"
+version: "0.4.1"
 slug: litert_llm_server
 description: "Local LLM inference via Google LiteRT with OpenAI- and Ollama-compatible APIs"
 arch:
@@ -21,6 +21,7 @@ options:
   context_length: 8192
   prompt_compaction: auto
   conversation_ttl: 300
+  tool_call_repair: true
   preload_models: []
   hf_token: ""
 schema:
@@ -32,6 +33,7 @@ schema:
   context_length: int(2048,32768)
   prompt_compaction: list(off|on|auto)
   conversation_ttl: int(0,3600)
+  tool_call_repair: bool
   preload_models:
     - str
   hf_token: password?

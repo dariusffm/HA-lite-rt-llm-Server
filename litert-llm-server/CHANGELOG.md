@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1 — 2026-09-16
+
+- Tool calls that carry no entity `name` although the user named the entity
+  (Gemma 4 E2B: `HassTurnOn{domain: [light], device_class: [switch]}` for
+  "mach die Wohnzimmer-Fenster-Lampe an") are repaired: the add-on inserts the
+  catalogue name from HA's Assist prompt and the entity's real domain, and
+  drops the guessed `device_class`. Skipped when the call already targets a
+  name, area or floor, or when the user text matches no or several entities.
+  Option `tool_call_repair` (default `true`); log `tool call repaired: …`.
+
 ## 0.4.0 — 2026-09-16
 
 - The engine keeps the last conversation alive and, when Home Assistant sends

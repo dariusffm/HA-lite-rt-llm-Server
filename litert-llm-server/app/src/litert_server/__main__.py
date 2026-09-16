@@ -27,6 +27,7 @@ from litert_server.engines.litert import LiteRTEngine
 from litert_server.model_registry.filesystem import FilesystemCache
 from litert_server.model_registry.huggingface import HuggingFaceRegistry
 from litert_server.services.compaction import CompactingInferenceService
+from litert_server.services.repair import ToolCallRepairService
 
 log = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ def build_app(
     registry: ModelRegistry,
     tools_enabled: bool = True,
 ) -> FastAPI:
-    app = FastAPI(title="litert-llm-server", version="0.4.0")
+    app = FastAPI(title="litert-llm-server", version="0.4.1")
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
@@ -120,12 +121,15 @@ def make_production_app() -> FastAPI:
     compacting = compaction_enabled(settings.prompt_compaction, settings.context_length)
     if compacting:
         engine = CompactingInferenceService(engine)
+    if settings.tool_call_repair:
+        engine = ToolCallRepairService(engine)
     log.info(
         "prompt compaction: %s (%s, context_length %d)",
         "enabled" if compacting else "disabled",
         settings.prompt_compaction,
         settings.context_length,
     )
+    log.info("tool call repair: %s", "enabled" if settings.tool_call_repair else "disabled")
     log.info("context length: %d", settings.context_length)
     if settings.conversation_ttl > 0:
         log.info("conversation reuse: enabled (ttl %ds)", settings.conversation_ttl)

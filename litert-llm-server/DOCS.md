@@ -222,6 +222,13 @@ Google names two options: **Gemma 4** (E2B/E4B/12B) for agentic chat, and
   (kept 7475 tokens, idle 12.3s)` and `conversation reuse skipped: <reason>`.
   With `prompt_compaction` active, follow-up *questions* usually change the
   compacted entity list and run fresh; tool rounds reuse.
+- `tool_call_repair` (`true`): if the model calls a tool that takes an entity
+  `name` (HassTurnOn, HassTurnOff, …) without one, and the last user message
+  contains exactly one entity name or alias from the Assist prompt, the add-on
+  fills in that name and the entity's domain and drops a guessed
+  `device_class`. Calls that already name a target, an area or a floor are
+  left alone, as are ambiguous user texts. Log: `tool call repaired: HassTurnOn
+  name='Wohnzimmer-Fenster-Lampe' (from user text)`.
 - Single-slot engine: switching models mid-flight triggers a reload.
 - No request queue: concurrent requests serialize.
 - No authentication: rely on HA's internal network.
