@@ -38,6 +38,15 @@ Fall 2 — selbstständig in Automationen (Node-RED), eigene Phase mit Spec:
 - [ ] Offene Entscheidung des Users: welche Geräteklassen darf das Modell ohne Rückfrage schalten (Licht? Steckdosen?), welche nur mit Bestätigung (Heizung, Schlösser, Tore, Rollläden)?
 - [ ] Wetter/Nachrichten in Node-RED: Wetter-/News-API als Tool im Subflow anbinden
 
+## Nächste Phase: Conversation-Wiederverwendung über Tool-Runden (Spike positiv, 2026-09-16)
+
+Spike: `docs/benchmarks/2026-09-16-conversation-reuse-spike.md` — Runde 2 lokal 19,6 s (frische Conversation) vs. 0,3 s (wiederverwendet); auf dem HA-Host entspricht das ~80 s → Sekunden pro Folgerunde und löst den 300-s-Pipeline-Timeout strukturell.
+- [ ] Brainstorming + Spec: `LiteRTEngine` hält pro geladenem Modell die letzte `Conversation` samt gesendeten Nachrichten; ist die neue Anfrage eine strukturelle Fortsetzung (gleiche Nachrichten + unsere Assistant-Antwort + Tool-Ergebnisse; Tool-Calls über Name + geparste Argumente vergleichen, nicht Text), werden nur die neuen Turns per `send_message_async` angehängt (Tool-Ergebnis als `{"role": "tool", "content": [{"type": "tool_response", …}]}`)
+- [ ] Frische Conversation, wenn: Sampler-/Constrained-Decoding-Konfiguration abweicht (ist bei `create_conversation` fixiert), Kontextüberlauf-Retry, Modellwechsel (`Engine.close()`), Stufe-1-Aufruf (eigene kurze Conversation)
+- [ ] Zusammenspiel mit `prompt_compaction`: der gekürzte Systemprompt muss über die Runden identisch bleiben (Cache-Treffer in Stufe 1), sonst greift die Wiederverwendung nie
+- [ ] Vorbehalt aus dem Spike prüfen: mit synthetischem 260-Entitäten-Prompt lieferte E2B in Runde 2 leere Antworten (frisch wie wiederverwendet); mit echtem HA-Prompt gegentesten
+- [ ] Ressourcen: nur eine gehaltene Conversation pro Modell, `close()` beim Verwerfen; Abnahme auf HA: Schaltbefehl mit Abschlussantwort unter 300 s, Lampenfrage deutlich unter 2,5 min
+
 ## Offen daneben
 
 - [ ] RAM-Bedarf pro `context_length` messen und dokumentieren (16384 → Prozess auf dem HA-Host nach Modell-Laden gestorben, vermutlich OOM); Schutz: Watchdog an, ggf. Kontext beim Start gegen freien RAM prüfen
