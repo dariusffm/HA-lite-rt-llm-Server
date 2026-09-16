@@ -183,9 +183,9 @@ INFO-Zeilen der Engine (Logger `litert_server.engines.litert`):
 
 - `conversation reuse: appended 1 turn (kept 7475 tokens, idle 12.3s)`
 - `conversation reuse skipped: <Grund>` mit Gründen in fester Reihenfolge:
-  `disabled`, `stage-1 call`, `held busy`, `model differs`, `tools differ`,
+  `held busy`, `model differs`, `tools differ`,
   `config differs`, `not a prefix`, `reply differs`, `N new turns`,
-  `new turn role X`. Kein Log, wenn nichts gehalten war (erster Aufruf).
+  `new turn role X`. Kein Log, wenn keine gehaltene Conversation in Frage kam (erster Aufruf, `conversation_ttl` 0, Stufe-1-Aufruf).
 - `conversation reuse: dropped (<Ereignis>)` auf DEBUG bei Abbruch, Fehler,
   Modellwechsel, TTL.
 
