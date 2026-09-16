@@ -85,12 +85,15 @@ class CompactingInferenceService:
         try:
             started = time.monotonic()
             query, cached = await self._relevance(model, question, ctx.entities)
+            stage_one_elapsed = time.monotonic() - started
             picked = select_entities(ctx.entities, query)
             if not picked:
                 raise _Skip("no entity matched")
         except _Skip as why:
             log.info("prompt compaction skipped: %s", why)
             return messages
+        # render_static_context/compact_live_context are total (never raise),
+        # so they run outside the _Skip-catching try above.
         system = ChatTurn(role="system", content=render_static_context(ctx, picked))
         compacted = 0
         out = [system]
@@ -106,7 +109,7 @@ class CompactingInferenceService:
             len(ctx.entities),
             len(picked),
             compacted,
-            time.monotonic() - started,
+            stage_one_elapsed,
             "cache hit" if cached else "cache miss",
         )
         return out
@@ -116,11 +119,9 @@ class CompactingInferenceService:
     ) -> tuple[RelevanceQuery, bool]:
         hit = self._cache.get(question)
         if hit is not None:
-            self._cache.move_to_end(question)
             return hit, True
-        turns = build_stage_one_turns(
-            question, available_domains(entities), available_areas(entities)
-        )
+        domains = available_domains(entities)
+        turns = build_stage_one_turns(question, domains, available_areas(entities))
         try:
             async with asyncio.timeout(self._timeout):
                 text, _finish, _calls = await collect_chat(
@@ -135,7 +136,7 @@ class CompactingInferenceService:
             raise _Skip(f"stage-1 reply unparseable: {text[:80]!r}")
         if query.is_empty():
             raise _Skip("stage-1 query empty")
-        if query.domains and not (query.domains & {d.lower() for d in available_domains(entities)}):
+        if query.domains and not (query.domains & {d.lower() for d in domains}):
             if not (query.areas or query.names):
                 raise _Skip(f"stage-1 named unknown domains {sorted(query.domains)}")
         self._cache[question] = query

@@ -96,11 +96,11 @@ def parse_stage_one(text: str) -> RelevanceQuery | None:
     data = _load_json_object(text)
     if data is None:
         return None
-    sets = [_string_set(data.get(key, [])) for key in ("domains", "areas", "names")]
-    if any(s is None for s in sets):
+    domains = _string_set(data.get("domains", []))
+    areas = _string_set(data.get("areas", []))
+    names = _string_set(data.get("names", []))
+    if domains is None or areas is None or names is None:
         return None
-    domains, areas, names = sets
-    assert domains is not None and areas is not None and names is not None
     return RelevanceQuery(domains=domains, areas=areas, names=names)
 
 

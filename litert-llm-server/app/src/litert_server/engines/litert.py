@@ -325,9 +325,10 @@ class LiteRTEngine:
         # ``{domain:light}``), which surfaces as an engine error instead of a
         # tool call. Constraining generation to the tool grammar fixes this
         # and leaves plain-text replies untouched (spike 2026-09-16).
+        constrained: ConstrainedDecodingConfig | None
         response_format: Any | None = None
         if schema_tools:
-            constrained: ConstrainedDecodingConfig | None = ConstrainedDecodingConfig(enable=True)
+            constrained = ConstrainedDecodingConfig(enable=True)
             if params.response_pattern is not None:
                 log.warning("response_pattern ignored: tools take precedence")
         elif params.response_pattern is not None:
