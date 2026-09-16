@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0 — 2026-09-16
+
+- New option `prompt_compaction` (`off` | `on` | `auto`, default `auto`).
+  For Home Assistant Assist requests the add-on first asks the model which
+  domains, areas or names the question is about (short JSON call), then
+  runs the real turn with the system prompt reduced to those entities and
+  `GetLiveContext` results rewritten to one line per entity. `auto`
+  compacts only while `context_length` is below 16384. Requests without
+  HA's Assist prompt are untouched; any parsing or stage-1 problem falls
+  back to the original prompt and logs the reason.
+- `GenerationParams.response_pattern`: engines enforce a regex on the reply via
+  constrained decoding when no tools are offered.
+
 ## 0.2.4 — 2026-09-16
 
 - Tool calls are now generated with LiteRT-LM constrained decoding whenever

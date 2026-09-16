@@ -48,6 +48,10 @@ engines/        # Concrete inference backends (LiteRTEngine, …).
                 # Import from domain/, never the other way.
 model_registry/ # Concrete model lifecycle (download, cache).
                 # Import from domain/, never the other way.
+services/       # Application services (use-case orchestration), e.g. the
+                # prompt-compaction decorator around InferenceService.
+                # Import from domain/ only (+ PyYAML). Never engines/,
+                # adapters/, model_registry/ or config.
 adapters/       # HTTP protocol adapters (openai_router, ollama_router).
                 # Import from domain/ ONLY. Never import engines/ or
                 # model_registry/ directly.
@@ -64,6 +68,8 @@ __main__.py     # FastAPI app construction. The ONLY place where concrete
 - Streaming: the domain returns `AsyncIterator[Token]`. SSE framing
   (OpenAI) and NDJSON framing (Ollama) lives in the respective adapter — not
   in the engine and not in the service.
+- `services/` imports only `domain/` (+ PyYAML); decorators around
+  `InferenceService` are wired exclusively in `__main__`.
 
 ## Common Commands
 

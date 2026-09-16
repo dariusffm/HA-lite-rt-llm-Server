@@ -166,6 +166,18 @@ Google names two options: **Gemma 4** (E2B/E4B/12B) for agentic chat, and
 - **Context window: `context_length` option, default 8192 tokens (model
   supports up to 32k); prompt + completion combined**. Long multi-turn
   conversations may exhaust it; no automatic truncation in MVP.
+- `prompt_compaction` (`auto`): Home Assistant's Assist prompt lists every
+  exposed entity and `GetLiveContext` results can be large. With compaction
+  on, the add-on first asks the model (a short extra call, ~10–20 s on CPU
+  hosts) which domains, areas or names the question concerns, then runs the
+  turn with only those entities in the system prompt and Live Context results
+  rewritten to one line per entity. `auto` enables this while `context_length`
+  is below 16384; set `on` for slow hosts with large windows, `off` to always
+  send the full prompt. Only requests carrying HA's Assist prompt are
+  affected. If stage 1 fails, times out, returns nothing usable or no entity
+  matches, the full prompt is used and the log says why:
+  `prompt compaction skipped: …`. Successful runs log
+  `prompt compaction: entities 176→14, tool turns compacted 1, stage-1 12.3s (cache miss)`.
 - Single-slot engine: switching models mid-flight triggers a reload.
 - No request queue: concurrent requests serialize.
 - No authentication: rely on HA's internal network.
