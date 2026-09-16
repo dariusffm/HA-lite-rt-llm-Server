@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0 — 2026-09-16
+
+- The engine keeps the last conversation alive and, when Home Assistant sends
+  the same conversation back with one new turn (a tool result or a follow-up
+  question), appends only that turn instead of prefilling the whole prompt
+  again. On the test host a tool round drops from ~80 s to a few seconds, so
+  multi-round Assist requests finish inside HA's 300 s pipeline timeout.
+- New option `conversation_ttl` (seconds, default 300): how long an idle
+  conversation is kept; `0` disables reuse. One KV cache of the last prompt
+  stays in memory for that long.
+- Reuse is skipped (and logged as `conversation reuse skipped: <reason>`)
+  when the model, tools or sampler settings differ, when more than one turn
+  is new, or when HA trimmed the history. Stage-1 compaction calls never
+  touch the held conversation.
+
 ## 0.3.3 — 2026-09-16
 
 - Stage-1 relevance routing no longer mangles multi-word area and entity

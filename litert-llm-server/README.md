@@ -51,6 +51,7 @@ with HTTP 401.
 | `max_tokens` | 1024 | Default output token cap per request; must stay below `context_length` |
 | `temperature` | 0.7 | Default sampling temperature |
 | `context_length` | 8192 | Engine context window in tokens (2048–32768); prompt + completion must fit |
+| `conversation_ttl` | 300 | Seconds an idle conversation's KV cache is kept for reuse across tool rounds and follow-ups; `0` disables reuse |
 | `preload_models` | `[]` | Model names to pull on startup |
 | `tool_calling` | true | Ignore/accept client tool definitions (see DOCS) |
 | `hf_token` | `""` | HuggingFace read token; required only for gated `google/*` models |

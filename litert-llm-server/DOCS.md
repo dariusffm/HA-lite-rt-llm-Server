@@ -63,7 +63,7 @@ The last line matters: Home Assistant aborts an Assist run after 300 s
 ("Timeout running pipeline", not configurable in the UI). Every tool round
 costs a full prefill of system prompt, tool definitions and history (about
 80 s on the test host), so a third round hits the limit. Actions already
-executed stay executed; only the closing sentence is lost.
+executed stay executed; only the closing sentence is lost. Since 0.4.0 follow-up rounds reuse the held conversation (see `conversation_ttl`), so the instruction is a safety net rather than the only defence.
 
 Entities are found by **area** and **domain** filters only if they are
 assigned in HA (Settings → Areas, and Settings → Voice assistants → Expose).
@@ -211,6 +211,17 @@ Google names two options: **Gemma 4** (E2B/E4B/12B) for agentic chat, and
   matches, the full prompt is used and the log says why:
   `prompt compaction skipped: …`. Successful runs log
   `prompt compaction: entities 176→14, tool turns compacted 1, stage-1 12.3s (cache miss)`.
+- `conversation_ttl` (`300`): Home Assistant resends the whole conversation on
+  every tool round. The add-on keeps the last conversation's KV cache alive
+  and, when the next request is the same conversation plus one new turn,
+  appends only that turn. Follow-up rounds then cost seconds instead of a
+  full prefill (~80 s on the test host), which keeps multi-round requests
+  inside HA's 300 s pipeline timeout. The cache is dropped after
+  `conversation_ttl` idle seconds, on client abort, on errors and on model
+  switch; `0` disables reuse. Log lines: `conversation reuse: appended 1 turn
+  (kept 7475 tokens, idle 12.3s)` and `conversation reuse skipped: <reason>`.
+  With `prompt_compaction` active, follow-up *questions* usually change the
+  compacted entity list and run fresh; tool rounds reuse.
 - Single-slot engine: switching models mid-flight triggers a reload.
 - No request queue: concurrent requests serialize.
 - No authentication: rely on HA's internal network.
