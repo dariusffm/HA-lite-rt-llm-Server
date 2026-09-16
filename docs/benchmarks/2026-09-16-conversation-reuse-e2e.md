@@ -45,3 +45,15 @@ Startlog `tool call repair: enabled`. Anfrage (Modell kalt): „Ich brauche die 
 **Lampe geschaltet, Abschlussantwort nach ~3 min, kein Timeout.** Befund: Runde 3 lief frisch, weil die Engine den
 unreparierten Call des Modells gemerkt hatte, HA aber den reparierten zurückschickt. Fix 0.4.2: Fortsetzungsvergleich nur
 über Tool-Namen (Spec §5.1 angepasst).
+
+## 0.4.2 Abnahme: Ausschalten über das Modell (Modell kalt)
+
+„Ich brauche die Wohnzimmer-Fenster-Lampe jetzt nicht mehr, mach sie bitte wieder aus“
+
+| Runde | Add-on-Log | Ergebnis |
+|---|---|---|
+| 1 | `compaction 176→30, stage-1 14.9s (miss)`; `tool call repaired: intent__HassTurnOff name='Wohnzimmer-Fenster-Lampe'` | HA `success: light.wohnzimmer_fenster_lampe` |
+| 2 | `conversation reuse: appended 1 turn (kept 3557 tokens)` — Fortsetzung trotz repariertem Call | „The Wohnzimmer-Fenster-Lampe is now off.“ |
+
+**Gesamtbild 0.4.2:** Schaltbefehle über das Modell funktionieren in beide Richtungen, Folgerunden laufen als Fortsetzung,
+kein Pipeline-Timeout. Verbleibende Kosten: Stufe 1 (~13–15 s) und ein Prefill pro Anfrage.
