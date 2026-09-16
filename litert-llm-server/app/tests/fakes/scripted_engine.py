@@ -11,7 +11,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
-from litert_server.domain.types import ChatTurn, GenerationParams, Token, ToolSpec
+from litert_server.domain.types import ChatTurn, GenerationParams, Token, ToolCall, ToolSpec
 
 
 @dataclass
@@ -24,7 +24,7 @@ class ScriptedChatCall:
 
 @dataclass
 class ScriptedEngine:
-    replies: list[str | Exception] = field(default_factory=list)
+    replies: list[str | Exception | list[ToolCall]] = field(default_factory=list)
     delay: float = 0.0  # seconds before the first token of every call
     chat_calls: list[ScriptedChatCall] = field(default_factory=list)
     completion_calls: list[tuple[str, str, GenerationParams]] = field(default_factory=list)
@@ -53,6 +53,9 @@ class ScriptedEngine:
             reply = self.replies.pop(0) if self.replies else ""
             if isinstance(reply, Exception):
                 raise reply
+            if isinstance(reply, list):
+                yield Token(text="", index=0, finish_reason="tool_calls", tool_calls=reply)
+                return
             yield Token(text=reply, index=0, finish_reason="stop")
         except (GeneratorExit, asyncio.CancelledError):
             self.stream_cancelled = True
