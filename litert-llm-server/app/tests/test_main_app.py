@@ -1,5 +1,5 @@
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -13,6 +13,23 @@ from litert_server.__main__ import (
 from litert_server.domain.types import ToolCall
 from tests.fakes.fake_engine import FakeEngine
 from tests.fakes.fake_registry import FakeRegistry
+
+
+@pytest.fixture(autouse=True)
+def _restore_app_logger_state() -> Iterator[None]:
+    """``configure_logging`` mutates the shared ``litert_server`` logger
+    (level, handlers, propagate) and never restores it; without this the
+    tests below leave ``propagate = False`` behind, which silently starves
+    every later caplog-based assertion (caplog attaches to the root logger).
+    """
+    logger = logging.getLogger("litert_server")
+    level = logger.level
+    handlers = list(logger.handlers)
+    propagate = logger.propagate
+    yield
+    logger.setLevel(level)
+    logger.handlers = handlers
+    logger.propagate = propagate
 
 
 @pytest.fixture

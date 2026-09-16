@@ -23,6 +23,11 @@ QUESTION = ChatTurn(role="user", content="Welche Lampen sind an?")
 PARAMS = GenerationParams(max_tokens=64, temperature=0.3)
 TOOLS = [ToolSpec(name="GetLiveContext", description="d", parameters={"type": "object"})]
 LIGHTS_ONLY = json.dumps({"domains": ["light"], "areas": [], "names": []})
+COVER_ONLY = json.dumps({"domains": ["cover"], "areas": [], "names": []})
+SYSTEM_COVER = ChatTurn(
+    role="system",
+    content=HEAD + STATIC_MARKER + "\n" + "- names: Garage Tor\n  domain: cover\n  areas: Garage\n",
+)
 LIVE = (
     "Live Context: An overview of the areas and the devices in this smart home:\n"
     "- names: Wohnzimmer Lampe\n  domain: light\n  state: 'on'\n  areas: Wohnzimmer\n"
@@ -63,17 +68,21 @@ async def test_passthrough_without_ha_marker():
 
 
 @pytest.mark.parametrize(
-    "stage_one_reply, reason",
+    "stage_one_reply, reason, level",
     [
-        ("not json", "stage-1 reply unparseable"),
-        (json.dumps({"domains": [], "areas": [], "names": []}), "stage-1 query empty"),
-        (json.dumps({"domains": ["cover"], "areas": [], "names": []}), "unknown domains"),
-        (json.dumps({"domains": [], "areas": ["Keller"], "names": []}), "no entity matched"),
-        (RuntimeError("engine down"), "stage-1 failed"),
+        ("not json", "stage-1 reply unparseable", "INFO"),
+        (json.dumps({"domains": [], "areas": [], "names": []}), "stage-1 query empty", "INFO"),
+        (json.dumps({"domains": ["cover"], "areas": [], "names": []}), "unknown domains", "INFO"),
+        (
+            json.dumps({"domains": [], "areas": ["Keller"], "names": []}),
+            "no entity matched",
+            "INFO",
+        ),
+        (RuntimeError("engine down"), "stage-1 failed", "WARNING"),
     ],
 )
 async def test_fallbacks_keep_prompt_unchanged_and_log_reason(
-    stage_one_reply, reason, caplog: pytest.LogCaptureFixture
+    stage_one_reply, reason, level, caplog: pytest.LogCaptureFixture
 ):
     inner = ScriptedEngine(replies=[stage_one_reply, "ok"])
     svc = CompactingInferenceService(inner)
@@ -83,6 +92,10 @@ async def test_fallbacks_keep_prompt_unchanged_and_log_reason(
 
     assert inner.chat_calls[-1].messages == [SYSTEM, QUESTION]
     assert reason in caplog.text
+    [record] = caplog.records
+    assert record.levelname == level
+    if level == "WARNING":
+        assert "RuntimeError" in caplog.text  # exception class name, not just its message
 
 
 async def test_stage_one_timeout_falls_back(caplog: pytest.LogCaptureFixture):
@@ -96,6 +109,18 @@ async def test_stage_one_timeout_falls_back(caplog: pytest.LogCaptureFixture):
     assert "stage-1 timed out" in caplog.text
 
 
+async def test_stage_one_timeout_closes_the_inner_stream():
+    """MAJOR 2: a timed-out stage 1 must not leave the inner stream running —
+    the decorator has to close it explicitly rather than rely on the
+    ``asyncio.timeout`` cancellation reaching the engine's own cleanup."""
+    inner = ScriptedEngine(replies=[LIGHTS_ONLY, "ok"], delay=0.2)
+    svc = CompactingInferenceService(inner, stage_one_timeout=0.05)
+
+    await _run(svc, [SYSTEM, QUESTION])
+
+    assert inner.stream_cancelled is True
+
+
 async def test_cache_skips_stage_one_for_repeated_question():
     inner = ScriptedEngine(replies=[LIGHTS_ONLY, "a", "b"])
     svc = CompactingInferenceService(inner)
@@ -104,6 +129,19 @@ async def test_cache_skips_stage_one_for_repeated_question():
     await _run(svc, [SYSTEM, QUESTION])
 
     assert len(inner.chat_calls) == 3  # stage1 once, stage2 twice
+
+
+async def test_cache_key_scoped_to_available_domains_and_areas():
+    """MINOR 3: the same question text against a different entity set must
+    not reuse a stale stage-1 answer — the previous run's domain ('light')
+    would not even exist among the new entities' domains ('cover')."""
+    inner = ScriptedEngine(replies=[LIGHTS_ONLY, "a", COVER_ONLY, "b"])
+    svc = CompactingInferenceService(inner)
+
+    await _run(svc, [SYSTEM, QUESTION])
+    await _run(svc, [SYSTEM_COVER, QUESTION])
+
+    assert len(inner.chat_calls) == 4  # stage 1 ran again for the changed entity set
 
 
 async def test_live_context_tool_turns_are_compacted_but_other_turns_untouched():

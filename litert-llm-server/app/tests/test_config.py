@@ -75,3 +75,9 @@ def test_prompt_compaction_env(monkeypatch):
 def test_prompt_compaction_defaults_auto(monkeypatch):
     monkeypatch.delenv("LITERT_PROMPT_COMPACTION", raising=False)
     assert Settings().prompt_compaction == "auto"
+
+
+def test_log_level_accepts_critical(monkeypatch):
+    # config.yaml's schema offers `critical` (MINOR 7); the Literal must match.
+    monkeypatch.setenv("LITERT_LOG_LEVEL", "critical")
+    assert Settings().log_level == "critical"

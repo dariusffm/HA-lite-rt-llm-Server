@@ -59,6 +59,18 @@ def _parse_entity_list(block: str) -> list[Entity] | None:
     return data
 
 
+def _split_trailing_blanks(block: list[str], rest: list[str]) -> tuple[list[str], list[str]]:
+    """Move blank lines trailing the block onto the front of ``rest`` instead
+    of discarding them, so a blank line between the entity list and the tail
+    stays character-identical (spec §5)."""
+    trailing = 0
+    while trailing < len(block) and block[len(block) - 1 - trailing] == "":
+        trailing += 1
+    if trailing == 0:
+        return block, rest
+    return block[: len(block) - trailing], block[len(block) - trailing :] + rest
+
+
 def _split_yaml_block(lines: list[str]) -> tuple[list[str], list[str]]:
     """Take leading lines that belong to a YAML list (items, continuations,
     blanks); return (block, rest). Skips only blank lines and FILTER_NOTE before the block."""
@@ -76,10 +88,10 @@ def _split_yaml_block(lines: list[str]) -> tuple[list[str], list[str]]:
             block.append(line)
         else:
             # Non-YAML line found
-            return block, lines[j:]
+            return _split_trailing_blanks(block, lines[j:])
 
     # All remaining lines were part of the block (or empty)
-    return block, []
+    return _split_trailing_blanks(block, [])
 
 
 def split_static_context(text: str) -> StaticContext | None:

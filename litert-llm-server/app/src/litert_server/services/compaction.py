@@ -39,6 +39,10 @@ log = logging.getLogger(__name__)
 class _Skip(Exception):
     """Internal: abort compaction and use the original messages."""
 
+    def __init__(self, message: str, *, level: int = logging.INFO) -> None:
+        super().__init__(message)
+        self.level = level
+
 
 class CompactingInferenceService:
     def __init__(
@@ -51,7 +55,9 @@ class CompactingInferenceService:
         self._inner = inner
         self._timeout = stage_one_timeout
         self._cache_size = cache_size
-        self._cache: OrderedDict[str, RelevanceQuery] = OrderedDict()
+        self._cache: OrderedDict[tuple[str, frozenset[str], frozenset[str]], RelevanceQuery] = (
+            OrderedDict()
+        )
 
     # -- InferenceService -----------------------------------------------------
 
@@ -90,7 +96,7 @@ class CompactingInferenceService:
             if not picked:
                 raise _Skip("no entity matched")
         except _Skip as why:
-            log.info("prompt compaction skipped: %s", why)
+            log.log(why.level, "prompt compaction skipped: %s", why)
             return messages
         # render_static_context/compact_live_context are total (never raise),
         # so they run outside the _Skip-catching try above.
@@ -117,11 +123,16 @@ class CompactingInferenceService:
     async def _relevance(
         self, model: str, question: str, entities: list[Entity]
     ) -> tuple[RelevanceQuery, bool]:
-        hit = self._cache.get(question)
+        domains = available_domains(entities)
+        areas = available_areas(entities)
+        # Scoped to the available domains/areas, not just the question text:
+        # a changed entity set (e.g. HA exposing new areas) must not reuse a
+        # stage-1 answer computed against the previous set (MINOR 3).
+        cache_key = (question, frozenset(domains), frozenset(areas))
+        hit = self._cache.get(cache_key)
         if hit is not None:
             return hit, True
-        domains = available_domains(entities)
-        turns = build_stage_one_turns(question, domains, available_areas(entities))
+        turns = build_stage_one_turns(question, domains, areas)
         try:
             async with asyncio.timeout(self._timeout):
                 text, _finish, _calls = await collect_chat(
@@ -130,7 +141,7 @@ class CompactingInferenceService:
         except TimeoutError as exc:
             raise _Skip(f"stage-1 timed out after {self._timeout:.0f}s") from exc
         except Exception as exc:  # engine errors must never reach the client here
-            raise _Skip(f"stage-1 failed: {exc!r}") from exc
+            raise _Skip(f"stage-1 failed: {exc!r}", level=logging.WARNING) from exc
         query = parse_stage_one(text)
         if query is None:
             raise _Skip(f"stage-1 reply unparseable: {text[:80]!r}")
@@ -139,7 +150,7 @@ class CompactingInferenceService:
         if query.domains and not (query.domains & {d.lower() for d in domains}):
             if not (query.areas or query.names):
                 raise _Skip(f"stage-1 named unknown domains {sorted(query.domains)}")
-        self._cache[question] = query
+        self._cache[cache_key] = query
         while len(self._cache) > self._cache_size:
             self._cache.popitem(last=False)
         return query, False

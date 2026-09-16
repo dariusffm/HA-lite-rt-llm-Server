@@ -14,9 +14,7 @@ from typing import Any, Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-LogLevel = Literal[
-    "trace", "debug", "info", "notice", "warning", "error", "fatal"
-]
+LogLevel = Literal["trace", "debug", "info", "notice", "warning", "error", "fatal", "critical"]
 
 
 class Settings(BaseSettings):

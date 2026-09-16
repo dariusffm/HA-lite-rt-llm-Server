@@ -4,6 +4,7 @@ callable — no real model involved.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import queue
 import threading
@@ -58,6 +59,37 @@ async def test_aclose_invokes_cancel():
     await gen.aclose()
     assert cancelled is True
     event.set()
+
+
+async def test_task_cancellation_mid_stream_invokes_cancel_and_stops_producer():
+    """A timed-out ``asyncio.timeout`` block delivers ``CancelledError`` at the
+    consumer's current await point, not ``GeneratorExit`` — the cleanup must
+    fire for both (MAJOR 2: stage-1 timeout used to leak the producer thread
+    and never call ``cancel``)."""
+    finished = threading.Event()
+    cancelled = False
+
+    def cancel() -> None:
+        nonlocal cancelled
+        cancelled = True
+
+    def producer(q: queue.Queue) -> None:
+        try:
+            for i in range(500):  # far more than the queue holds
+                q.put(str(i))
+        finally:
+            finished.set()
+
+    gen = _bridge_producer(producer, cancel)
+    task = asyncio.ensure_future(anext(gen))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert cancelled is True, "cancel() was not invoked on task cancellation mid-stream"
+    assert finished.wait(5), "producer thread still blocked in q.put after task cancellation"
 
 
 async def test_producer_stops_after_consumer_leaves():

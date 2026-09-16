@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import yaml
+
 from litert_server.services.ha_prompt import (
     FILTER_NOTE,
     STATIC_MARKER,
@@ -65,6 +67,22 @@ def test_render_static_context_keeps_head_and_tail_and_adds_note():
     assert out.endswith("Answer in German.\n")
     assert "Wohnzimmer Lampe" in out and "Bad Temperatur" not in out
     assert split_static_context(out) is not None  # still parseable
+
+
+def test_render_static_context_round_trips_a_blank_line_before_the_tail():
+    """MINOR 2: spec §5 requires the rest of the prompt to stay
+    character-identical; a blank line between the entity list and the tail
+    (e.g. a following instruction paragraph) must not be swallowed."""
+    entities = [{"names": "Wohnzimmer Lampe", "domain": "light", "areas": "Wohnzimmer"}]
+    body = yaml.safe_dump(entities, allow_unicode=True, sort_keys=False, default_flow_style=False)
+    text = HEAD + STATIC_MARKER + "\n" + FILTER_NOTE + "\n" + body + "\nAnswer in German.\n"
+
+    ctx = split_static_context(text)
+    assert ctx is not None
+
+    out = render_static_context(ctx, ctx.entities)
+
+    assert out == text
 
 
 def test_entity_names_includes_aliases_and_entity_areas_accepts_str_or_list():

@@ -81,10 +81,12 @@ class _TokenQueue(queue.Queue[Any]):
 
 async def _bridge_producer(producer: Producer, cancel: Cancel) -> AsyncIterator[Token]:
     """Run a synchronous ``producer`` in a daemon thread and yield tokens it
-    puts on a bounded queue. On ``GeneratorExit`` (client disconnect) the
-    ``cancel`` callable is invoked so the upstream C resource can abort an
-    in-flight decode, and the queue stops accepting items so the producer
-    thread ends instead of blocking on a full queue.
+    puts on a bounded queue. On ``GeneratorExit`` (client disconnect) or
+    ``asyncio.CancelledError`` (e.g. an ``asyncio.timeout`` firing while a
+    caller awaits this stream) the ``cancel`` callable is invoked so the
+    upstream C resource can abort an in-flight decode, and the queue stops
+    accepting items so the producer thread ends instead of blocking on a
+    full queue.
     """
     q = _TokenQueue(maxsize=_TOKEN_QUEUE_MAX)
 
@@ -119,7 +121,7 @@ async def _bridge_producer(producer: Producer, cancel: Cancel) -> AsyncIterator[
                 return
             yield Token(text=str(item), index=index, finish_reason=None)
             index += 1
-    except GeneratorExit:
+    except (GeneratorExit, asyncio.CancelledError):
         q.consumer_gone.set()
         try:
             cancel()

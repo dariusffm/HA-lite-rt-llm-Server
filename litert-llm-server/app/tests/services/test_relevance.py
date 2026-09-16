@@ -77,6 +77,16 @@ def test_parse_stage_one_repairs_truncated_output_and_treats_missing_lists_as_em
     )
 
 
+def test_parse_stage_one_preserves_spaces_in_multi_word_areas_and_names():
+    q = parse_stage_one('{"domains":[],"areas":["Bad Oben"],"names":["Bad Temperatur"]}')
+
+    assert q == RelevanceQuery(
+        domains=frozenset(), areas=frozenset({"bad oben"}), names=frozenset({"bad temperatur"})
+    )
+    entity = {"names": "Bad Temperatur", "domain": "sensor", "areas": "Bad Oben"}
+    assert select_entities([entity], q) == [entity]
+
+
 def test_parse_stage_one_empty_lists_is_empty_query():
     q = parse_stage_one('{"domains": [], "areas": [], "names": []}')
     assert q is not None and q.is_empty()

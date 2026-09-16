@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.3 — 2026-09-16
+
+- Stage-1 relevance routing no longer mangles multi-word area and entity
+  names (e.g. "Bad Oben"); a compacted prompt could previously drop the
+  entity the user actually asked about.
+- A stage-1 request that times out now always closes the inner decode
+  instead of leaking the producer thread and its conversation on the
+  single-slot engine.
+- Unexpected stage-1 engine errors are now logged at `warning` (previously
+  `info`, indistinguishable from an expected fallback such as a timeout).
+- The stage-1 cache key now includes the available domains/areas, so a
+  changed entity set no longer reuses a stale routing answer for the same
+  question text.
+- The add-on option `log_level: critical` (already offered by the schema)
+  is now accepted instead of raising a startup error.
+- A blank line between the entity list and any trailing prompt text is no
+  longer swallowed when the static context is re-rendered.
+
 ## 0.3.2 — 2026-09-16
 
 - The note the add-on writes into a compacted Assist prompt now tells the

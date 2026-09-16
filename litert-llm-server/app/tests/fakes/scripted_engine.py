@@ -28,6 +28,10 @@ class ScriptedEngine:
     delay: float = 0.0  # seconds before the first token of every call
     chat_calls: list[ScriptedChatCall] = field(default_factory=list)
     completion_calls: list[tuple[str, str, GenerationParams]] = field(default_factory=list)
+    # Set when a `stream_chat` call is torn down mid-flight (``aclose()`` or
+    # task cancellation) instead of running to completion — lets tests prove
+    # a caller actually closed the stream rather than abandoning it.
+    stream_cancelled: bool = False
 
     async def stream_completion(
         self, model: str, prompt: str, params: GenerationParams
@@ -43,9 +47,13 @@ class ScriptedEngine:
         tools: list[ToolSpec] | None = None,
     ) -> AsyncIterator[Token]:
         self.chat_calls.append(ScriptedChatCall(model, list(messages), params, tools))
-        if self.delay:
-            await asyncio.sleep(self.delay)
-        reply = self.replies.pop(0) if self.replies else ""
-        if isinstance(reply, Exception):
-            raise reply
-        yield Token(text=reply, index=0, finish_reason="stop")
+        try:
+            if self.delay:
+                await asyncio.sleep(self.delay)
+            reply = self.replies.pop(0) if self.replies else ""
+            if isinstance(reply, Exception):
+                raise reply
+            yield Token(text=reply, index=0, finish_reason="stop")
+        except (GeneratorExit, asyncio.CancelledError):
+            self.stream_cancelled = True
+            raise

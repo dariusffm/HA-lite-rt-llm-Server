@@ -81,7 +81,7 @@ def _repair(text: str) -> str:
 
 
 def _load_json_object(text: str) -> dict[str, Any] | None:
-    compact = "".join(text.split())
+    compact = text.strip()
     for candidate in (compact, _repair(compact)):
         try:
             data = json.loads(candidate)
