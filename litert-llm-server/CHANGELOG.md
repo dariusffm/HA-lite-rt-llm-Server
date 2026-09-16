@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2 — 2026-09-16
+
+- Conversation reuse now compares tool-call *names* only when matching HA's
+  echoed assistant reply. A repaired tool call (0.4.1) no longer breaks the
+  continuation, so the closing round after an action reuses the held
+  conversation instead of prefilling again.
+
 ## 0.4.1 — 2026-09-16
 
 - Tool calls that carry no entity `name` although the user named the entity

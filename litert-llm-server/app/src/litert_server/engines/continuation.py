@@ -44,14 +44,17 @@ def tools_key(tools: list[ToolSpec] | None) -> tuple[ToolSpec, ...] | None:
     return tuple(tools) if tools else None
 
 
-def _calls(turn: ChatTurn) -> list[tuple[str, dict[str, Any]]]:
-    return [(c.name, c.arguments) for c in (turn.tool_calls or [])]
+def _calls(turn: ChatTurn) -> list[str]:
+    # Names only: the tool-call repair service may rewrite arguments before
+    # HA sees them, and HA echoes the rewritten call back.
+    return [c.name for c in (turn.tool_calls or [])]
 
 
 def same_turn(a: ChatTurn, b: ChatTurn) -> bool:
     """Structural equality: HA rewrites our assistant reply (new tool-call
-    ids, arguments re-serialised, text part changed), so ids are ignored and
-    the content of tool-calling assistant turns is not compared."""
+    ids, arguments re-serialised or repaired, text part changed), so only the
+    tool names are compared and the content of tool-calling assistant turns
+    is ignored."""
     if a.role != b.role or _calls(a) != _calls(b):
         return False
     if a.role == "assistant" and a.tool_calls:

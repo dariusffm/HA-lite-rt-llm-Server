@@ -57,13 +57,21 @@ def test_same_turn_ignores_tool_call_ids_argument_order_and_assistant_content():
     assert same_turn(_CALL_MODEL, _CALL_HA)
 
 
-def test_same_turn_detects_different_tool_call_arguments():
-    other = ChatTurn(
+def test_same_turn_ignores_tool_call_arguments_but_not_names():
+    # HA may send back a repaired call (tool_call_repair adds the entity name);
+    # the conversation is still ours as long as the tool names match.
+    repaired = ChatTurn(
         role="assistant",
         content="",
-        tool_calls=[ToolCall(id="z", name="GetLiveContext", arguments={"domain": "switch"})],
+        tool_calls=[ToolCall(id="z", name="GetLiveContext", arguments={"domain": "switch", "name": "x"})],
     )
-    assert not same_turn(_CALL_MODEL, other)
+    assert same_turn(_CALL_MODEL, repaired)
+    other_tool = ChatTurn(
+        role="assistant",
+        content="",
+        tool_calls=[ToolCall(id="z", name="HassTurnOn", arguments={"domain": "light", "area": "Bad"})],
+    )
+    assert not same_turn(_CALL_MODEL, other_tool)
 
 
 def test_same_turn_compares_content_for_plain_turns():

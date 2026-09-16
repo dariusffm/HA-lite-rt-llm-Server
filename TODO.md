@@ -42,7 +42,7 @@ Fall 2 — selbstständig in Automationen (Node-RED), eigene Phase mit Spec:
 
 Spec `docs/superpowers/specs/2026-09-16-conversation-reuse-design.md`, Plan `docs/superpowers/plans/2026-09-16-conversation-reuse.md`, Abnahme `docs/benchmarks/2026-09-16-conversation-reuse-e2e.md`.
 - [x] Engine hält die letzte Conversation, hängt Fortsetzungen an (Tool-Runden und Folgefragen), Option `conversation_ttl`; auf HA: Folgerunden `appended 1 turn`, kein Pipeline-Timeout mehr
-- [ ] Schalten über das Modell scheitert weiter an Gemma: `HassTurnOn` ohne `name` → `MatchFailedError`. Hebel: Wohnzimmer-Fenster-Lampe dem Bereich Wohnzimmer zuordnen; Agent-Anweisung „Call HassTurnOn/HassTurnOff with the entity name the user said“; später Tool-Argument-Reparatur im Add-on (bekannten Entitätsnamen aus der Frage ergänzen)
+- [x] Schalten über das Modell: `HassTurnOn` ohne `name` wird seit 0.4.1 im Add-on repariert (`services/repair.py`, Option `tool_call_repair`); auf HA abgenommen: Lampe an, „The Wohnzimmer-Fenster-Lampe is now on.“ Offen: Reparatur bei mehreren Tool-Calls pro Runde (bleibt bewusst „mehrdeutig → unverändert“)
 - [ ] Mehrere neue Turns (parallele Tool-Ergebnisse) laufen frisch, litert_lm 0.17 kann nichts ohne Antwort anhängen (Spec §7); bei neuer litert_lm-Version erneut prüfen
 - [ ] Cache-Schlüssel der Kürzung nicht nach Modell getrennt (Minor aus dem 0.3.x-Review); Engine-Semaphore weiter offen
 

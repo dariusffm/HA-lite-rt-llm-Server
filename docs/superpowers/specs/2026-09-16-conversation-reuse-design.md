@@ -91,9 +91,9 @@ Bedingungen gelten:
 ### 5.1 Turn-Gleichheit
 
 Zwei `ChatTurn` gelten als gleich, wenn `role` und `content` gleich sind und
-die Tool-Calls gleich sind. Tool-Calls werden **ohne `id`** verglichen: Liste
-von `(name, arguments)`, `arguments` als Dict (Adapter parsen HAs
-JSON-String bereits zu `dict`; die Reihenfolge der Schlüssel ist egal). HA
+die Tool-Calls gleich sind. Tool-Calls werden **nur über ihre Namen** verglichen
+(seit 0.4.2; Argumente werden ignoriert, weil `tool_call_repair` sie vor HA
+umschreiben darf und HA die umgeschriebene Form zurücksendet). HA
 schreibt unsere Assistant-Antwort strukturell anders zurück als das Modell
 sie erzeugt hat (Spike Q5), daher kein Textvergleich der Rohform. `tool_name`
 wird bei Rolle `tool` verglichen, wenn beide Seiten ihn setzen.

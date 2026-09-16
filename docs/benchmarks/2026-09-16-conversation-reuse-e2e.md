@@ -1,4 +1,4 @@
-# E2E — Conversation-Wiederverwendung (Add-on 0.4.0) auf Home Assistant
+# E2E — Conversation-Wiederverwendung und Tool-Call-Reparatur (Add-on 0.4.0–0.4.2) auf Home Assistant
 
 **Datum:** 2026-09-16  **Host:** HAOS `homek` (HA Core 2026.9.2), Add-on `83680c0c_litert_llm_server`, Modell `gemma-4-e2b`,
 `context_length` 8192, `prompt_compaction` auto (aktiv), `conversation_ttl` 300, 176 freigegebene Entitäten.
@@ -31,3 +31,17 @@ Antworttext identisch. Spike-Risiko „leere Antwort in Runde 2“ trat weder lo
   entity name the user said“; längerfristig Tool-Argument-Reparatur im Add-on (Name aus der Nutzerfrage ergänzen, wenn
   er als Entität bekannt ist) — nicht Teil dieser Phase.
 - Beobachtung: `kept N tokens` wächst pro Runde um ~100–330 Tokens; der KV-Cache bleibt bis `conversation_ttl` im RAM.
+
+## 0.4.1 Tool-Call-Reparatur
+
+Startlog `tool call repair: enabled`. Anfrage (Modell kalt): „Ich brauche die Wohnzimmer-Fenster-Lampe doch noch, mach sie bitte wieder an“
+
+| Runde | Add-on-Log | Tool-Aufruf / Ergebnis |
+|---|---|---|
+| 1 | `compaction 176→30, stage-1 13.5s (miss)` | `GetLiveContext{domain: light, area: Wohnzimmer}` |
+| 2 | `appended 1 turn (kept 3558 tokens)`; `tool call repaired: intent__HassTurnOn name='Wohnzimmer-Fenster-Lampe' (from user text)` | HA erhielt `{domain: [light], name: Wohnzimmer-Fenster-Lampe}` → `success: light.wohnzimmer_fenster_lampe` |
+| 3 | `conversation reuse skipped: reply differs` (frisch) | „The Wohnzimmer-Fenster-Lampe is now on.“ |
+
+**Lampe geschaltet, Abschlussantwort nach ~3 min, kein Timeout.** Befund: Runde 3 lief frisch, weil die Engine den
+unreparierten Call des Modells gemerkt hatte, HA aber den reparierten zurückschickt. Fix 0.4.2: Fortsetzungsvergleich nur
+über Tool-Namen (Spec §5.1 angepasst).
