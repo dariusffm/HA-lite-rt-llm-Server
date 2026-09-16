@@ -308,17 +308,36 @@ class LiteRTEngine:
     # --- conversation reuse (spec 2026-09-16-conversation-reuse-design.md) ---
 
     def _drop_held(self, reason: str) -> None:
-        """Close and forget the held conversation. Event-loop thread only."""
+        """Forget the held conversation. Event-loop thread only.
+
+        A conversation an in-flight continuation is still reading (``busy``)
+        is only detached here, never closed: the request using it owns the
+        close and will perform it once its stream ends (spec §8).
+        """
         held, self._held = self._held, None
         if held is None:
             return
         if held.timer is not None:
             held.timer.cancel()
+        if held.busy:
+            log.debug("conversation reuse: dropped (%s, busy: left to its request)", reason)
+            return
         log.debug("conversation reuse: dropped (%s)", reason)
         try:
             held.conversation.close()
         except Exception as exc:
             log.debug("conversation.close failed: %r", exc)
+
+    def _forget_other_model(self, model: str) -> None:
+        """Drop the held conversation if it belongs to a different model.
+
+        Event-loop thread only; called right before ``_ensure_loaded`` in
+        both ``stream_chat`` and ``stream_completion`` so a model switch via
+        either entry point never leaves ``_held`` pointing at a conversation
+        whose engine is about to be replaced.
+        """
+        if self._held is not None and self._held.state.model != model:
+            self._drop_held("model switch")
 
     def _hold(self, conversation: Any, state: HeldState) -> None:
         if self._held is not None and self._held.conversation is not conversation:
@@ -338,6 +357,7 @@ class LiteRTEngine:
         prompt: str,
         params: GenerationParams,
     ) -> AsyncIterator[Token]:
+        self._forget_other_model(model)
         await asyncio.to_thread(self._ensure_loaded, model)
         assert self._engine is not None
 
@@ -370,8 +390,7 @@ class LiteRTEngine:
     ) -> AsyncIterator[Token]:
         if not messages:
             raise ValueError("messages must not be empty")
-        if self._held is not None and self._held.state.model != model:
-            self._drop_held("model switch")
+        self._forget_other_model(model)
         await asyncio.to_thread(self._ensure_loaded, model)
         assert self._engine is not None
 
@@ -527,7 +546,14 @@ class LiteRTEngine:
                 held.busy = False
             if conversation is None:
                 pass
-            elif finished and can_hold:
+            elif new_turn is not None and held is not None and self._held is not held:
+                # A concurrent model switch detached this held conversation
+                # while we were still using it (spec §8: busy conversations
+                # are left to their own request to close). Whatever happened
+                # to our own stream, we own the close now — it is never
+                # re-held.
+                close_quietly(conversation)
+            elif finished and can_hold and self.current_model == model:
                 reply = ChatTurn(
                     role="assistant",
                     content="".join(reply_parts),

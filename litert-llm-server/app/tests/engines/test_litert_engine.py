@@ -438,3 +438,81 @@ async def test_ttl_expiry_closes_held_conversation(tmp_path: Path):
     await asyncio.sleep(0.15)
     assert engine._held is None
     assert fake.conversations[0].closed == 1
+
+
+# --- fix round 1: model switch must not leak or steal a busy conversation ---
+
+
+class _FakeSession:
+    """Stands in for the litert_lm Session used by ``stream_completion``."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def run_prefill(self, prompts) -> None:
+        pass
+
+    def run_decode_async(self):
+        yield type("Resp", (), {"texts": ["x"]})()
+
+    def cancel_process(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed = True
+
+
+async def test_stream_completion_drops_held_conversation_on_model_switch(
+    tmp_path: Path, monkeypatch
+):
+    engine, fake = _reuse_engine(tmp_path, [_TEXT])
+    fake.create_session = lambda **_kw: _FakeSession()  # type: ignore[method-assign]
+    await _drain(engine, [_sys(), _user(1)])
+    assert engine._held is not None
+
+    monkeypatch.setattr(engine, "_ensure_loaded", lambda name: None)
+    async for _ in engine.stream_completion("other", "prompt", _PARAMS):
+        pass
+
+    assert fake.conversations[0].closed == 1
+    assert engine._held is None
+
+
+async def test_forget_other_model_detaches_a_busy_conversation_without_closing(tmp_path: Path):
+    mid_flight = [{"content": [{"type": "text", "text": "x"}]}] * 3
+    engine, fake = _reuse_engine(tmp_path, [_TEXT, mid_flight])
+    await _drain(engine, [_sys(), _user(1)])
+    assert engine._held is not None
+
+    stream = engine.stream_chat(
+        "m",
+        [_sys(), _user(1), ChatTurn(role="assistant", content="ok"), _user(2)],
+        _PARAMS,
+    )
+    await anext(stream)  # first chunk of the continuation; still mid-flight
+
+    engine._forget_other_model("other")
+    assert engine._held is None
+    assert fake.conversations[0].closed == 0  # detached, not closed: the request still owns it
+
+    async for _ in stream:
+        pass
+
+    assert fake.conversations[0].closed == 1
+    assert engine._held is None  # a detached conversation is never re-held
+
+
+async def test_stale_model_at_finish_drops_a_fresh_conversation_without_holding(
+    tmp_path: Path, monkeypatch
+):
+    engine, fake = _reuse_engine(tmp_path, [_TEXT, _TEXT])
+    await _drain(engine, [_sys(), _user(1)])
+    assert engine._held is not None
+
+    engine.current_model = "other"
+    monkeypatch.setattr(engine, "_ensure_loaded", lambda name: None)
+    await _drain(engine, [_sys(), _user(1)])
+
+    assert engine._held is None
+    assert fake.conversations[0].closed == 1
+    assert fake.conversations[1].closed == 1
