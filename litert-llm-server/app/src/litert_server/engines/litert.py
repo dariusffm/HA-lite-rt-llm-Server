@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import queue
+import time
 from collections.abc import AsyncIterator, Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Any
@@ -28,6 +30,12 @@ from litert_server.domain.types import (
     ToolSpec,
     coerce_tool_arguments,
     new_tool_call_id,
+)
+from litert_server.engines.continuation import (
+    HeldState,
+    config_key,
+    find_continuation,
+    tools_key,
 )
 
 log = logging.getLogger(__name__)
@@ -244,15 +252,35 @@ def _drop_oldest_exchange(preface: list[ChatTurn]) -> list[ChatTurn] | None:
     return preface[:start] + (preface[end:] if end is not None else [])
 
 
+@dataclass
+class _Held:
+    """The conversation kept alive between requests (spec §6/§8)."""
+
+    conversation: Any
+    state: HeldState
+    last_used: float
+    busy: bool = False
+    timer: asyncio.TimerHandle | None = None
+
+
+def _token_count(conversation: Any) -> Any:
+    count = getattr(conversation, "token_count", None)
+    return count if isinstance(count, int) else "?"
+
+
 class LiteRTEngine:
     """Single-slot LiteRT-LM engine."""
 
-    def __init__(self, *, models_dir: Path, max_num_tokens: int = 8192) -> None:
+    def __init__(
+        self, *, models_dir: Path, max_num_tokens: int = 8192, conversation_ttl: float = 300.0
+    ) -> None:
         self.models_dir = models_dir
         self.max_num_tokens = max_num_tokens
+        self.conversation_ttl = conversation_ttl
         self._lock = Lock()
         self.current_model: str | None = None
         self._engine: Any | None = None
+        self._held: _Held | None = None
 
     def _model_file(self, model_name: str) -> Path:
         return self.models_dir / f"{model_name}.litertlm"
@@ -276,6 +304,33 @@ class LiteRTEngine:
         if params.top_p is not None:
             kwargs["top_p"] = params.top_p
         return SamplerConfig(**kwargs)
+
+    # --- conversation reuse (spec 2026-09-16-conversation-reuse-design.md) ---
+
+    def _drop_held(self, reason: str) -> None:
+        """Close and forget the held conversation. Event-loop thread only."""
+        held, self._held = self._held, None
+        if held is None:
+            return
+        if held.timer is not None:
+            held.timer.cancel()
+        log.debug("conversation reuse: dropped (%s)", reason)
+        try:
+            held.conversation.close()
+        except Exception as exc:
+            log.debug("conversation.close failed: %r", exc)
+
+    def _hold(self, conversation: Any, state: HeldState) -> None:
+        if self._held is not None and self._held.conversation is not conversation:
+            self._drop_held("replaced")
+        held = _Held(conversation=conversation, state=state, last_used=time.monotonic())
+        loop = asyncio.get_running_loop()
+        held.timer = loop.call_later(self.conversation_ttl, self._expire_held, held)
+        self._held = held
+
+    def _expire_held(self, held: _Held) -> None:
+        if self._held is held and not held.busy:
+            self._drop_held("ttl expired")
 
     async def stream_completion(
         self,
@@ -315,6 +370,8 @@ class LiteRTEngine:
     ) -> AsyncIterator[Token]:
         if not messages:
             raise ValueError("messages must not be empty")
+        if self._held is not None and self._held.state.model != model:
+            self._drop_held("model switch")
         await asyncio.to_thread(self._ensure_loaded, model)
         assert self._engine is not None
 
@@ -344,7 +401,37 @@ class LiteRTEngine:
         else:
             constrained = None
         sampler = self._build_sampler(params)
+
+        key = config_key(params, has_tools=bool(schema_tools))
+        reuse = self.conversation_ttl > 0 and params.response_pattern is None
+        held = self._held if reuse else None
+        new_turn: ChatTurn | None = None
+        if held is not None:
+            if held.busy:
+                reason = "held busy"
+            else:
+                new_turn, reason = find_continuation(held.state, model, messages, tools, key)
+            if new_turn is None:
+                log.info("conversation reuse skipped: %s", reason)
+                if not held.busy:
+                    self._drop_held(reason)
+                    held = None
+            else:
+                held.busy = True
+                if held.timer is not None:
+                    held.timer.cancel()
+                log.info(
+                    "conversation reuse: appended 1 turn (kept %s tokens, idle %.1fs)",
+                    _token_count(held.conversation),
+                    time.monotonic() - held.last_used,
+                )
+        # A request that finds the slot busy runs fresh and must not take it over.
+        can_hold = reuse and not (held is not None and held.busy and new_turn is None)
+
         active: list[Any] = []  # the conversation currently decoding, for cancel
+        used_turns: list[ChatTurn] = list(messages)  # what the conversation contains at the end
+        reply_parts: list[str] = []
+        reply_calls: list[ToolCall] = []
 
         def open_conversation(turns: list[ChatTurn]) -> Any:
             conversation = engine.create_conversation(
@@ -363,34 +450,52 @@ class LiteRTEngine:
             except Exception as exc:
                 log.debug("conversation.close failed: %r", exc)
 
+        send_kwargs: dict[str, Any] = {}
+        if response_format is not None:
+            send_kwargs["response_format"] = response_format
+
+        def stream_reply(conversation: Any, message: dict[str, Any], q: _TokenQueue) -> bool:
+            """Feed one reply into the queue; True once any token was emitted."""
+            emitted = False
+            for chunk in conversation.send_message_async(message, **send_kwargs):
+                calls = _extract_tool_calls(chunk) if tools else None
+                if calls:
+                    reply_calls.extend(calls)
+                    q.put(calls)
+                    return True
+                for piece in _extract_text(chunk):
+                    if piece:
+                        reply_parts.append(piece)
+                        q.put(piece)
+                        emitted = True
+            return emitted
+
         def producer(q: _TokenQueue) -> None:
+            if new_turn is not None and held is not None:
+                conversation = held.conversation
+                active[:] = [conversation]
+                stream_reply(conversation, _turn_to_litert(new_turn), q)
+                return
             turns = preface
             dropped = 0
-            emitted = False
             while True:
                 conversation = open_conversation(turns)
                 try:
-                    send_kwargs: dict[str, Any] = {}
-                    if response_format is not None:
-                        send_kwargs["response_format"] = response_format
-                    for chunk in conversation.send_message_async(last, **send_kwargs):
-                        calls = _extract_tool_calls(chunk) if tools else None
-                        if calls:
-                            q.put(calls)
-                            return
-                        for piece in _extract_text(chunk):
-                            if piece:
-                                q.put(piece)
-                                emitted = True
-                    return
+                    stream_reply(conversation, last, q)
                 except RuntimeError as exc:
                     # Retry only while nothing reached the client and the
                     # client is still there; a restarted decode would
                     # otherwise append a second answer to a half-sent one.
+                    # ``reply_parts`` (not a local flag) survives the
+                    # exception, since pieces are appended before the
+                    # generator can raise on its next chunk.
                     retriable = (
-                        _is_context_overflow(exc) and not emitted and not q.consumer_gone.is_set()
+                        _is_context_overflow(exc)
+                        and not reply_parts
+                        and not q.consumer_gone.is_set()
                     )
                     shorter = _drop_oldest_exchange(turns) if retriable else None
+                    close_quietly(conversation)
                     if shorter is None:
                         raise
                     dropped += len(turns) - len(shorter)
@@ -400,12 +505,44 @@ class LiteRTEngine:
                         dropped,
                     )
                     turns = shorter
-                finally:
+                    continue
+                except BaseException:
                     close_quietly(conversation)
+                    raise
+                used_turns[:] = [*turns, messages[-1]]
+                return
 
         def cancel() -> None:
             for conversation in active:
                 conversation.cancel_process()
 
-        async for tok in _bridge_producer(producer, cancel):
-            yield tok
+        finished = False
+        try:
+            async for tok in _bridge_producer(producer, cancel):
+                yield tok
+            finished = True
+        finally:
+            conversation = active[0] if active else None
+            if held is not None and new_turn is not None:
+                held.busy = False
+            if conversation is None:
+                pass
+            elif finished and can_hold:
+                reply = ChatTurn(
+                    role="assistant",
+                    content="".join(reply_parts),
+                    tool_calls=reply_calls or None,
+                )
+                state = HeldState(
+                    model=model,
+                    turns=tuple(used_turns),
+                    reply=reply,
+                    tools_key=tools_key(tools),
+                    config_key=key,
+                )
+                self._hold(conversation, state)
+            elif held is not None and conversation is held.conversation:
+                reason = "stream ended without clean finish" if not finished else "reuse disabled"
+                self._drop_held(reason)
+            else:
+                close_quietly(conversation)

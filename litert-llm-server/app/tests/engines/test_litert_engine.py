@@ -1,10 +1,11 @@
+import asyncio
 import logging
 from pathlib import Path
 
 import pytest
 
 from litert_server.domain.types import ChatTurn, GenerationParams, ToolCall, ToolSpec
-from litert_server.engines.litert import LiteRTEngine, _drop_oldest_exchange
+from litert_server.engines.litert import LiteRTEngine, _drop_oldest_exchange, _Held
 
 
 def test_engine_construction_does_not_load_model(tmp_path: Path):
@@ -237,3 +238,203 @@ async def test_stream_chat_without_pattern_sends_no_response_format(tmp_path: Pa
         pass
 
     assert "response_format" not in fake.conversations[0].send_kwargs
+
+
+# --- conversation reuse ------------------------------------------------------
+
+
+class _ReuseConversation:
+    """Fake litert_lm Conversation: scripted replies, records every message."""
+
+    def __init__(self, replies: list[list[dict]], created_with: list[dict]) -> None:
+        self.replies = replies
+        self.created_with = created_with
+        self.sent: list = []
+        self.closed = 0
+        self.cancelled = 0
+        self.token_count = 7475
+
+    def send_message_async(self, last, **kwargs):
+        self.sent.append(last)
+        reply = self.replies.pop(0)
+        for chunk in reply:
+            if isinstance(chunk, Exception):
+                raise chunk
+            yield chunk
+
+    def cancel_process(self) -> None:
+        self.cancelled += 1
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+class _ReuseEngine:
+    def __init__(self, replies: list[list[dict]]) -> None:
+        self.replies = replies
+        self.conversations: list[_ReuseConversation] = []
+
+    def create_conversation(self, *, messages, **_kw):
+        conv = _ReuseConversation(self.replies, list(messages or []))
+        self.conversations.append(conv)
+        return conv
+
+
+_TEXT = [{"content": [{"type": "text", "text": "ok"}]}]
+_CALL = [
+    {
+        "tool_calls": [
+            {
+                "id": "model-1",
+                "function": {"name": "GetLiveContext", "arguments": {"domain": "light"}},
+            }
+        ]
+    }
+]
+_REUSE_TOOLS = [ToolSpec(name="GetLiveContext", description="d", parameters={"type": "object"})]
+_HA_CALL = ChatTurn(
+    role="assistant",
+    content="",
+    tool_calls=[ToolCall(id="call_ha", name="GetLiveContext", arguments={"domain": "light"})],
+)
+_TOOL_RESULT = ChatTurn(role="tool", content='{"success": true}', tool_name="GetLiveContext")
+
+
+def _reuse_engine(tmp_path: Path, replies: list[list[dict]], ttl: float = 300.0):
+    fake = _ReuseEngine(replies)
+    engine = LiteRTEngine(models_dir=tmp_path, conversation_ttl=ttl)
+    engine._engine = fake
+    engine.current_model = "m"
+    return engine, fake
+
+
+async def _drain(engine: LiteRTEngine, messages, tools=None, params=_PARAMS, model="m"):
+    return [t async for t in engine.stream_chat(model, messages, params, tools=tools)]
+
+
+def test_engine_conversation_ttl_defaults_to_300(tmp_path: Path):
+    assert LiteRTEngine(models_dir=tmp_path).conversation_ttl == 300.0
+    assert LiteRTEngine(models_dir=tmp_path, conversation_ttl=0).conversation_ttl == 0
+
+
+async def test_tool_round_reuses_held_conversation(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    engine, fake = _reuse_engine(tmp_path, [_CALL, _TEXT])
+    caplog.set_level(logging.INFO, logger="litert_server.engines.litert")
+
+    first = await _drain(engine, [_sys(), _user(1)], tools=_REUSE_TOOLS)
+    assert first[-1].finish_reason == "tool_calls"
+    assert isinstance(engine._held, _Held)
+
+    second = await _drain(engine, [_sys(), _user(1), _HA_CALL, _TOOL_RESULT], tools=_REUSE_TOOLS)
+
+    assert "".join(t.text for t in second) == "ok"
+    assert len(fake.conversations) == 1, "continuation must not create a second conversation"
+    conv = fake.conversations[0]
+    assert conv.sent[1] == {
+        "role": "tool",
+        "content": [
+            {"type": "tool_response", "name": "GetLiveContext", "response": '{"success": true}'}
+        ],
+    }
+    assert conv.closed == 0
+    assert "conversation reuse: appended 1 turn (kept 7475 tokens" in caplog.text
+    # the held state now covers the whole exchange and our text reply
+    assert engine._held is not None
+    assert len(engine._held.state.turns) == 4
+    assert engine._held.state.reply == ChatTurn(role="assistant", content="ok")
+
+
+async def test_non_continuation_closes_held_and_starts_fresh(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    engine, fake = _reuse_engine(tmp_path, [_TEXT, _TEXT])
+    caplog.set_level(logging.INFO, logger="litert_server.engines.litert")
+
+    await _drain(engine, [_sys(), _user(1)])
+    await _drain(engine, [_sys(), _user(2)])
+
+    assert len(fake.conversations) == 2
+    assert fake.conversations[0].closed == 1
+    assert fake.conversations[1].closed == 0
+    assert "conversation reuse skipped: not a prefix" in caplog.text
+    assert engine._held is not None and engine._held.conversation is fake.conversations[1]
+
+
+async def test_first_call_logs_no_skip(tmp_path: Path, caplog: pytest.LogCaptureFixture):
+    engine, _ = _reuse_engine(tmp_path, [_TEXT])
+    caplog.set_level(logging.INFO, logger="litert_server.engines.litert")
+    await _drain(engine, [_sys(), _user(1)])
+    assert "conversation reuse skipped" not in caplog.text
+
+
+async def test_stage_one_call_neither_reuses_nor_evicts(tmp_path: Path):
+    engine, fake = _reuse_engine(tmp_path, [_CALL, _TEXT, _TEXT])
+    stage_one = GenerationParams(temperature=0.0, max_tokens=32, response_pattern=r"\{\}")
+
+    await _drain(engine, [_sys(), _user(1)], tools=_REUSE_TOOLS)
+    held_before = engine._held
+    await _drain(engine, [ChatTurn(role="user", content="route")], params=stage_one)
+    await _drain(engine, [_sys(), _user(1), _HA_CALL, _TOOL_RESULT], tools=_REUSE_TOOLS)
+
+    assert engine._held is not None and engine._held.conversation is held_before.conversation
+    assert len(fake.conversations) == 2  # stage-1 got its own, the tool round reused
+    assert fake.conversations[1].closed == 1  # stage-1 conversation closed as before
+
+
+async def test_ttl_zero_disables_holding(tmp_path: Path):
+    engine, fake = _reuse_engine(tmp_path, [_TEXT, _TEXT], ttl=0)
+    await _drain(engine, [_sys(), _user(1)])
+    assert engine._held is None
+    assert fake.conversations[0].closed == 1
+
+
+async def test_client_abort_closes_conversation_and_drops_held(tmp_path: Path):
+    engine, fake = _reuse_engine(tmp_path, [[{"content": [{"type": "text", "text": "a"}]}] * 3])
+    stream = engine.stream_chat("m", [_sys(), _user(1)], _PARAMS)
+    await anext(stream)
+    await stream.aclose()
+    await asyncio.sleep(0.05)  # let the producer thread observe consumer_gone
+    assert engine._held is None
+    assert fake.conversations[0].closed >= 1
+
+
+async def test_engine_error_closes_conversation_and_drops_held(tmp_path: Path):
+    engine, fake = _reuse_engine(tmp_path, [_TEXT, [RuntimeError("boom")]])
+    await _drain(engine, [_sys(), _user(1)])
+    with pytest.raises(RuntimeError, match="boom"):
+        await _drain(engine, [_sys(), _user(1), ChatTurn(role="assistant", content="ok"), _user(2)])
+    assert engine._held is None
+    assert fake.conversations[0].closed == 1
+
+
+async def test_overflow_on_continuation_is_not_retried(tmp_path: Path):
+    engine, fake = _reuse_engine(tmp_path, [_TEXT, [_OVERFLOW]])
+    await _drain(engine, [_sys(), _user(1)])
+    with pytest.raises(RuntimeError, match="too long"):
+        await _drain(engine, [_sys(), _user(1), ChatTurn(role="assistant", content="ok"), _user(2)])
+    assert len(fake.conversations) == 1
+    assert engine._held is None
+
+
+async def test_model_switch_drops_held_before_engine_close(tmp_path: Path, monkeypatch):
+    engine, fake = _reuse_engine(tmp_path, [_TEXT, _TEXT])
+    await _drain(engine, [_sys(), _user(1)])
+    order: list[str] = []
+    fake.conversations[0].close = lambda: order.append("conversation")  # type: ignore[method-assign]
+    monkeypatch.setattr(engine, "_ensure_loaded", lambda name: order.append("engine"))
+
+    await _drain(engine, [_sys(), _user(1)], model="other")
+
+    assert order[:2] == ["conversation", "engine"]
+    assert engine._held is None or engine._held.state.model == "other"
+
+
+async def test_ttl_expiry_closes_held_conversation(tmp_path: Path):
+    engine, fake = _reuse_engine(tmp_path, [_TEXT], ttl=0.05)
+    await _drain(engine, [_sys(), _user(1)])
+    assert engine._held is not None
+    await asyncio.sleep(0.15)
+    assert engine._held is None
+    assert fake.conversations[0].closed == 1
