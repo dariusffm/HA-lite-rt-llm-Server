@@ -9,6 +9,7 @@ from litert_server.__main__ import (
     build_app,
     compaction_enabled,
     configure_logging,
+    make_production_app,
 )
 from litert_server.domain.types import ToolCall
 from tests.fakes.fake_engine import FakeEngine
@@ -146,3 +147,36 @@ def test_configure_logging_sets_app_logger_level_and_handler():
 def test_configure_logging_maps_supervisor_level_names(name, level):
     configure_logging(name)
     assert logging.getLogger("litert_server").level == level
+
+
+# --- conversation reuse: startup log (spec §12) -----------------------------
+
+
+def test_make_production_app_logs_conversation_reuse_disabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, caplog: pytest.LogCaptureFixture
+):
+    monkeypatch.setenv("LITERT_MODELS_DIR", str(tmp_path))
+    monkeypatch.setenv("LITERT_CONVERSATION_TTL", "0")
+    caplog.set_level(logging.INFO, logger="litert_server.__main__")
+    # configure_logging() (called by make_production_app) sets
+    # propagate=False on "litert_server", which stops these records short
+    # of caplog's root-logger handler; attach it directly (the autouse
+    # `_restore_app_logger_state` fixture above strips it back off).
+    logging.getLogger("litert_server").addHandler(caplog.handler)
+
+    make_production_app()
+
+    assert "conversation reuse: disabled" in caplog.text
+
+
+def test_make_production_app_logs_conversation_reuse_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, caplog: pytest.LogCaptureFixture
+):
+    monkeypatch.setenv("LITERT_MODELS_DIR", str(tmp_path))
+    monkeypatch.delenv("LITERT_CONVERSATION_TTL", raising=False)
+    caplog.set_level(logging.INFO, logger="litert_server.__main__")
+    logging.getLogger("litert_server").addHandler(caplog.handler)
+
+    make_production_app()
+
+    assert "conversation reuse: enabled (ttl 300s)" in caplog.text

@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -516,3 +518,61 @@ async def test_stale_model_at_finish_drops_a_fresh_conversation_without_holding(
     assert engine._held is None
     assert fake.conversations[0].closed == 1
     assert fake.conversations[1].closed == 1
+
+
+# --- final fix wave: continuation abort must close on the producer thread --
+
+
+class _SlowReuseConversation(_ReuseConversation):
+    """Sleeps between chunks so a client abort can race an in-flight send,
+    and records which thread actually called ``close()``."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.close_thread_ident: int | None = None
+
+    def send_message_async(self, last, **kwargs):
+        self.sent.append(last)
+        reply = self.replies.pop(0)
+        for chunk in reply:
+            time.sleep(0.05)
+            if isinstance(chunk, Exception):
+                raise chunk
+            yield chunk
+
+    def close(self) -> None:
+        self.close_thread_ident = threading.get_ident()
+        super().close()
+
+
+class _SlowReuseEngine(_ReuseEngine):
+    def create_conversation(self, *, messages, **_kw):
+        conv = _SlowReuseConversation(self.replies, list(messages or []))
+        self.conversations.append(conv)
+        return conv
+
+
+async def test_continuation_abort_closes_on_producer_thread_not_loop_thread(tmp_path: Path):
+    five_chunks = [{"content": [{"type": "text", "text": "x"}]}] * 5
+    fake = _SlowReuseEngine([_TEXT, five_chunks])
+    engine = LiteRTEngine(models_dir=tmp_path, conversation_ttl=300.0)
+    engine._engine = fake
+    engine.current_model = "m"
+
+    await _drain(engine, [_sys(), _user(1)])
+    loop_thread_ident = threading.get_ident()
+
+    stream = engine.stream_chat(
+        "m",
+        [_sys(), _user(1), ChatTurn(role="assistant", content="ok"), _user(2)],
+        _PARAMS,
+    )
+    await anext(stream)  # the continuation is now mid-flight, still sleeping between chunks
+    await stream.aclose()
+    await asyncio.sleep(0.5)  # give the producer thread time to notice consumer_gone and close
+
+    conv = fake.conversations[0]
+    assert conv.closed == 1
+    assert conv.close_thread_ident is not None
+    assert conv.close_thread_ident != loop_thread_ident
+    assert engine._held is None

@@ -338,6 +338,20 @@ class LiteRTEngine:
         log.debug("conversation reuse: dropped (%s)", reason)
         _close_quietly(held.conversation)
 
+    def _detach_held(self, held: _Held, reason: str) -> None:
+        """Forget the held conversation without closing it. Event-loop
+        thread only; caller must already know ``self._held is held``.
+
+        Used when a continuation's own producer thread already closed (or
+        is about to close, once it notices the client is gone) the
+        conversation itself: closing it here too could race that thread
+        while it may still be iterating ``send_message_async`` (spec §8).
+        """
+        if held.timer is not None:
+            held.timer.cancel()
+        self._held = None
+        log.debug("conversation reuse: dropped (%s)", reason)
+
     def _forget_other_model(self, model: str) -> None:
         """Drop the held conversation if it belongs to a different model.
 
@@ -497,7 +511,16 @@ class LiteRTEngine:
             if new_turn is not None and held is not None:
                 conversation = held.conversation
                 active[:] = [conversation]
-                stream_reply(conversation, _turn_to_litert(new_turn), q)
+                try:
+                    stream_reply(conversation, _turn_to_litert(new_turn), q)
+                except BaseException:
+                    # Close on this thread, same as the fresh path below:
+                    # by the time an abort (``_ConsumerGone``) or engine
+                    # error reaches here, this thread is done iterating
+                    # ``send_message_async``, so closing now can never race
+                    # it. The event-loop thread only detaches afterwards.
+                    _close_quietly(conversation)
+                    raise
                 return
             turns = preface
             dropped = 0
@@ -577,7 +600,17 @@ class LiteRTEngine:
                 )
                 self._hold(conversation, state)
             elif continuation_of_held:
-                reason = "reuse disabled" if finished else "stream ended without clean finish"
-                self._drop_held(reason)
+                if finished:
+                    # The producer thread returned normally; closing here
+                    # cannot race it.
+                    self._drop_held("reuse disabled")
+                else:
+                    # Abort or error: the producer thread's own except
+                    # clause above already closed this conversation (or is
+                    # about to, once it notices the client is gone), so
+                    # only detach it here — closing it too would race that
+                    # thread's possibly still-live iteration.
+                    assert held is not None
+                    self._detach_held(held, "stream ended without clean finish")
             else:
                 _close_quietly(conversation)
