@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.3 — 2026-09-16
+
+- Chat requests whose prompt exceeds `context_length` no longer fail with
+  `Input token ids are too long`: the engine drops the oldest history round
+  (user turn, tool calls and tool results) and retries until the prompt
+  fits, logging a warning with the number of dropped turns. Only when the
+  system prompt plus the latest message alone do not fit is the error
+  returned to the client as before.
+- A producer thread blocked on a full token queue now ends within about
+  half a second after the client disconnects instead of hanging forever
+  and keeping the conversation in memory.
+- Failures while closing or cancelling a conversation are logged at debug
+  level instead of being silently swallowed.
+
 ## 0.2.2 — 2026-09-15
 
 - Internal cleanup after the tool-calling phase: shared tool-argument parsing

@@ -52,14 +52,16 @@ executes tools itself; Home Assistant offers them and runs them:
   back.
 
 Home Assistant resends the whole conversation history with every message,
-and Assist tool results (e.g. a `GetLiveContext` device list) are large. If
-the add-on log shows `Input token ids are too long`, either raise
-`context_length` **only if the host has the RAM for it** — on the test host
-(HAOS, aarch64) 16384 made the process die right after model load, presumably
-OOM-killed, and the add-on stayed stopped — or, preferably, lower the agent
-option *Max. Nachrichten im Verlauf* (e.g. 6) so the history stays bounded.
-Starting a new chat also resets the history. Enable the add-on **Watchdog**
-so a killed process is restarted automatically.
+and Assist tool results (e.g. a `GetLiveContext` device list) are large. When
+the prompt exceeds `context_length`, the add-on drops the oldest history
+rounds until it fits and logs `prompt exceeds context window; dropped N
+oldest history turn(s)`. The model then answers without that older context.
+If this happens often, lower the agent option *Max. Nachrichten im Verlauf*
+(e.g. 6) or expose fewer entities to Assist. Raise `context_length` **only
+if the host has the RAM for it** — on the test host (HAOS, aarch64) 16384
+made the process die right after model load, presumably OOM-killed, and the
+add-on stayed stopped. Enable the add-on **Watchdog** so a killed process is
+restarted automatically.
 
 Set `tool_calling: false` to ignore all tools: replies are plain text as in
 0.1.x, even if the agent has Assist or MCP tools enabled.

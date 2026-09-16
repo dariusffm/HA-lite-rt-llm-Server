@@ -7,7 +7,7 @@ import logging
 import queue
 from collections.abc import AsyncIterator, Callable, Mapping
 from pathlib import Path
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 from typing import Any
 
 from litert_lm import Backend, Engine, SamplerConfig
@@ -31,25 +31,69 @@ _SENTINEL: Any = object()
 # HTTP client without unbounded memory growth.
 _TOKEN_QUEUE_MAX = 64
 
-Producer = Callable[["queue.Queue[Any]"], None]
+# How long a blocked ``put`` waits before re-checking whether the consumer
+# is still there. Bounds how long a producer thread outlives its client.
+_PUT_POLL_SECONDS = 0.5
+
+Producer = Callable[["_TokenQueue"], None]
 Cancel = Callable[[], None]
+
+
+class _ConsumerGone(Exception):
+    """Raised inside the producer thread once the async consumer has left."""
+
+
+class _TokenQueue(queue.Queue[Any]):
+    """Bounded queue whose ``put`` gives up once the consumer is gone.
+
+    Without this a producer blocked on a full queue would hang forever after
+    the HTTP client disconnected, keeping the conversation and its memory.
+    """
+
+    def __init__(self, maxsize: int) -> None:
+        super().__init__(maxsize=maxsize)
+        self.consumer_gone = Event()
+
+    def put(self, item: Any, block: bool = True, timeout: float | None = None) -> None:
+        while True:
+            if self.consumer_gone.is_set():
+                raise _ConsumerGone
+            try:
+                super().put(item, block=block, timeout=_PUT_POLL_SECONDS)
+                return
+            except queue.Full:
+                continue
+
+    def wake_consumer(self) -> None:
+        """Unblock a ``get`` that may still be pending in the executor."""
+        try:
+            queue.Queue.put(self, _SENTINEL, block=False)
+        except queue.Full:
+            pass
 
 
 async def _bridge_producer(producer: Producer, cancel: Cancel) -> AsyncIterator[Token]:
     """Run a synchronous ``producer`` in a daemon thread and yield tokens it
     puts on a bounded queue. On ``GeneratorExit`` (client disconnect) the
     ``cancel`` callable is invoked so the upstream C resource can abort an
-    in-flight decode.
+    in-flight decode, and the queue stops accepting items so the producer
+    thread ends instead of blocking on a full queue.
     """
-    q: queue.Queue[Any] = queue.Queue(maxsize=_TOKEN_QUEUE_MAX)
+    q = _TokenQueue(maxsize=_TOKEN_QUEUE_MAX)
 
     def runner() -> None:
         try:
             producer(q)
-        except Exception as exc:
-            q.put(exc)
-        finally:
             q.put(_SENTINEL)
+        except _ConsumerGone:
+            log.debug("producer stopped: consumer gone")
+            q.wake_consumer()
+        except Exception as exc:
+            try:
+                q.put(exc)
+            except _ConsumerGone:
+                log.debug("producer failed after consumer left: %r", exc)
+                q.wake_consumer()
 
     Thread(target=runner, daemon=True).start()
 
@@ -69,10 +113,11 @@ async def _bridge_producer(producer: Producer, cancel: Cancel) -> AsyncIterator[
             yield Token(text=str(item), index=index, finish_reason=None)
             index += 1
     except GeneratorExit:
+        q.consumer_gone.set()
         try:
             cancel()
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("cancel_process failed: %r", exc)
         raise
 
 
@@ -171,6 +216,25 @@ def _extract_tool_calls(chunk: Mapping[str, Any]) -> list[ToolCall] | None:
     return calls or None
 
 
+_OVERFLOW_MARKER = "Input token ids are too long"
+
+
+def _is_context_overflow(exc: BaseException) -> bool:
+    return isinstance(exc, RuntimeError) and _OVERFLOW_MARKER in str(exc)
+
+
+def _drop_oldest_exchange(preface: list[ChatTurn]) -> list[ChatTurn] | None:
+    """Remove the oldest user round (user turn up to the next user turn) from
+    a chat preface, keeping leading system turns. Returns ``None`` when there
+    is nothing left to drop.
+    """
+    start = next((i for i, t in enumerate(preface) if t.role != "system"), None)
+    if start is None:
+        return None
+    end = next((i for i in range(start + 1, len(preface)) if preface[i].role == "user"), None)
+    return preface[:start] + (preface[end:] if end is not None else [])
+
+
 class LiteRTEngine:
     """Single-slot LiteRT-LM engine."""
 
@@ -227,8 +291,8 @@ class LiteRTEngine:
             finally:
                 try:
                     session.close()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.debug("session.close failed: %r", exc)
 
         async for tok in _bridge_producer(producer, session.cancel_process):
             yield tok
@@ -245,31 +309,69 @@ class LiteRTEngine:
         await asyncio.to_thread(self._ensure_loaded, model)
         assert self._engine is not None
 
-        preface = [_turn_to_litert(m) for m in messages[:-1]]
+        engine = self._engine
+        preface = list(messages[:-1])
         last = _turn_to_litert(messages[-1])
+        schema_tools = [_SchemaTool(t) for t in tools] if tools else None
+        sampler = self._build_sampler(params)
+        active: list[Any] = []  # the conversation currently decoding, for cancel
 
-        conversation = self._engine.create_conversation(
-            messages=preface or None,
-            tools=[_SchemaTool(t) for t in tools] if tools else None,
-            automatic_tool_calling=False,
-            sampler_config=self._build_sampler(params),
-        )
+        def open_conversation(turns: list[ChatTurn]) -> Any:
+            conversation = engine.create_conversation(
+                messages=[_turn_to_litert(m) for m in turns] or None,
+                tools=schema_tools,
+                automatic_tool_calling=False,
+                sampler_config=sampler,
+            )
+            active[:] = [conversation]
+            return conversation
 
-        def producer(q: queue.Queue[Any]) -> None:
+        def close_quietly(conversation: Any) -> None:
             try:
-                for chunk in conversation.send_message_async(last):
-                    calls = _extract_tool_calls(chunk) if tools else None
-                    if calls:
-                        q.put(calls)
-                        return
-                    for piece in _extract_text(chunk):
-                        if piece:
-                            q.put(piece)
-            finally:
-                try:
-                    conversation.close()
-                except Exception:
-                    pass
+                conversation.close()
+            except Exception as exc:
+                log.debug("conversation.close failed: %r", exc)
 
-        async for tok in _bridge_producer(producer, conversation.cancel_process):
+        def producer(q: _TokenQueue) -> None:
+            turns = preface
+            dropped = 0
+            emitted = False
+            while True:
+                conversation = open_conversation(turns)
+                try:
+                    for chunk in conversation.send_message_async(last):
+                        calls = _extract_tool_calls(chunk) if tools else None
+                        if calls:
+                            q.put(calls)
+                            return
+                        for piece in _extract_text(chunk):
+                            if piece:
+                                q.put(piece)
+                                emitted = True
+                    return
+                except RuntimeError as exc:
+                    # Retry only while nothing reached the client and the
+                    # client is still there; a restarted decode would
+                    # otherwise append a second answer to a half-sent one.
+                    retriable = (
+                        _is_context_overflow(exc) and not emitted and not q.consumer_gone.is_set()
+                    )
+                    shorter = _drop_oldest_exchange(turns) if retriable else None
+                    if shorter is None:
+                        raise
+                    dropped += len(turns) - len(shorter)
+                    log.warning(
+                        "prompt exceeds context window; dropped %d oldest history turn(s) "
+                        "and retrying",
+                        dropped,
+                    )
+                    turns = shorter
+                finally:
+                    close_quietly(conversation)
+
+        def cancel() -> None:
+            for conversation in active:
+                conversation.cancel_process()
+
+        async for tok in _bridge_producer(producer, cancel):
             yield tok

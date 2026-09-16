@@ -4,6 +4,7 @@ callable — no real model involved.
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 
@@ -57,3 +58,39 @@ async def test_aclose_invokes_cancel():
     await gen.aclose()
     assert cancelled is True
     event.set()
+
+
+async def test_producer_stops_after_consumer_leaves():
+    finished = threading.Event()
+
+    def producer(q: queue.Queue) -> None:
+        try:
+            for i in range(500):  # far more than the queue holds
+                q.put(str(i))
+        finally:
+            finished.set()
+
+    gen = _bridge_producer(producer, lambda: None)
+    await anext(gen)
+    await gen.aclose()
+
+    assert finished.wait(5), "producer thread still blocked in q.put after consumer left"
+
+
+async def test_aclose_logs_failing_cancel(caplog: pytest.LogCaptureFixture):
+    event = threading.Event()
+
+    def cancel() -> None:
+        raise RuntimeError("cancel exploded")
+
+    def producer(q: queue.Queue) -> None:
+        q.put("a")
+        event.wait()
+
+    gen = _bridge_producer(producer, cancel)
+    await anext(gen)
+    with caplog.at_level(logging.DEBUG, logger="litert_server.engines.litert"):
+        await gen.aclose()
+    event.set()
+
+    assert "cancel exploded" in caplog.text
