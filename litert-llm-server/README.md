@@ -53,6 +53,8 @@ with HTTP 401.
 | `context_length` | 8192 | Engine context window in tokens (2048–32768); prompt + completion must fit |
 | `conversation_ttl` | 300 | Seconds an idle conversation's KV cache is kept for reuse across tool rounds and follow-ups; `0` disables reuse |
 | `tool_call_repair` | true | Fill in the entity `name` of a tool call from the user's words when the model left it out |
+| `switching_tool_names` | `[HassTurnOff, HassToggle]` | Tools that may not be run without a target (`name`, `area` or `floor`) |
+| `switching_block_reply` | `Welches Gerät oder welchen Bereich meinst du genau?` | Reply the model sees when an untargeted switching call is blocked |
 | `generation_timeout` | 240 | Seconds a single generation may run before it is cancelled; `0` disables |
 | `preload_models` | `[]` | Model names to pull on startup |
 | `tool_calling` | true | Ignore/accept client tool definitions (see DOCS) |

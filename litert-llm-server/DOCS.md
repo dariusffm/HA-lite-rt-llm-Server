@@ -229,6 +229,15 @@ Google names two options: **Gemma 4** (E2B/E4B/12B) for agentic chat, and
   `device_class`. Calls that already name a target, an area or a floor are
   left alone, as are ambiguous user texts. Log: `tool call repaired: HassTurnOn
   name='Wohnzimmer-Fenster-Lampe' (from user text)`.
+- `switching_tool_names` (`[HassTurnOff, HassToggle]`): names of tools that
+  change entity state and should not be run without a target. If such a call has
+  no `name`, `area` or `floor`, and the current or previous user message did not
+  say "alle", the call is blocked and the model receives the configured reply
+  instead of executing it.
+- `switching_block_reply`
+  (`"Welches Gerät oder welchen Bereich meinst du genau?"`): the reply sent to
+  the model when an untargeted switching call is blocked. Change it for a
+  different language or wording.
 - `generation_timeout` (`240`): caps how long a single generation (chat or
   completion) may run. If it is still not finished after the budget,
   the engine calls `cancel_process()`, logs a WARNING with elapsed time,
