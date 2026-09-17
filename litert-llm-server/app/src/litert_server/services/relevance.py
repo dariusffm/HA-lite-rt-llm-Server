@@ -64,7 +64,7 @@ def build_stage_one_turns(
     )
     content = (
         question
-        if previous_question is None
+        if not previous_question
         else f"Previous question: {previous_question}\nQuestion: {question}"
     )
     return [ChatTurn(role="system", content=system), ChatTurn(role="user", content=content)]

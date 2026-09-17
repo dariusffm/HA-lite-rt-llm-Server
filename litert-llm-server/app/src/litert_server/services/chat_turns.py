@@ -17,9 +17,14 @@ def last_two_user_texts(messages: list[ChatTurn]) -> tuple[str | None, str | Non
     is the user turn immediately before the last one (one hop only), or
     ``None`` when there isn't one.
     """
-    indices = [i for i, m in enumerate(messages) if m.role == "user"]
-    if not indices:
-        return None, None
-    last = messages[indices[-1]].content
-    previous = messages[indices[-2]].content if len(indices) > 1 else None
+    last: str | None = None
+    previous: str | None = None
+    for m in reversed(messages):
+        if m.role != "user":
+            continue
+        if last is None:
+            last = m.content
+        else:
+            previous = m.content
+            break
     return last, previous

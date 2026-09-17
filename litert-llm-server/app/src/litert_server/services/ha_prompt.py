@@ -215,7 +215,7 @@ def _constraint_fields(error_text: str) -> dict[str, str]:
 
 
 def _constraint_set(value: str | None) -> list[str]:
-    return re.findall(r"'([^']*)'", value) if value else []
+    return sorted(re.findall(r"'([^']*)'", value)) if value else []
 
 
 def _match_failed_constraints(error_text: str) -> str:
@@ -250,6 +250,40 @@ def _render_error(error: dict[str, Any]) -> str | None:
     )
 
 
+def _envelope_result(data: Any) -> str | None:
+    """Return HA's JSON-encoded ``result`` payload string from an envelope dict.
+
+    Returns ``None`` when ``data`` is not a dict or has no string ``result``.
+    """
+    if isinstance(data, dict):
+        result = data.get("result")
+        if isinstance(result, str):
+            return result
+    return None
+
+
+def _unwrap_envelope(data: Any) -> dict[str, Any] | None:
+    """Return the inner HA payload dict from either a bare dict or HA's envelope.
+
+    Returns ``None`` when the input is not a dict containing an error/success
+    payload.
+    """
+    if not isinstance(data, dict):
+        return None
+    result = _envelope_result(data)
+    if result is not None:
+        try:
+            inner: Any = json.loads(result)
+        except ValueError:
+            return None
+        if isinstance(inner, dict):
+            return inner
+        return None
+    if "error" in data or "success" in data:
+        return data
+    return None
+
+
 def render_tool_error(content: str) -> str | None:
     """Render an HA intent-handler error (``{"error": ..., "error_text": ...}``,
     e.g. ``MatchFailedError``) as a short, unmistakable line for the model.
@@ -263,14 +297,12 @@ def render_tool_error(content: str) -> str | None:
         data: Any = json.loads(content)
     except ValueError:
         return None
-    if isinstance(data, dict) and isinstance(data.get("result"), str):
-        try:
-            data = json.loads(data["result"])
-        except ValueError:
-            return None
-    if not isinstance(data, dict) or "error" not in data:
+    if isinstance(data, dict) and data.get("success") is True:
         return None
-    return _render_error(data)
+    unwrapped = _unwrap_envelope(data)
+    if unwrapped is None:
+        return None
+    return _render_error(unwrapped)
 
 
 def compact_live_context(content: str) -> str | None:
@@ -284,12 +316,13 @@ def compact_live_context(content: str) -> str | None:
     if direct is not None:
         return direct
     try:
-        data = json.loads(content)
+        data: Any = json.loads(content)
     except ValueError:
         return None
-    if not isinstance(data, dict) or not isinstance(data.get("result"), str):
+    result = _envelope_result(data)
+    if result is None:
         return None
-    compact = _compact_live_text(data["result"])
+    compact = _compact_live_text(result)
     if compact is None:
         return None
     return json.dumps({**data, "result": compact}, ensure_ascii=False)
