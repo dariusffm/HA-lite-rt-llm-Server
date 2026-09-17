@@ -233,7 +233,10 @@ Google names two options: **Gemma 4** (E2B/E4B/12B) for agentic chat, and
   change entity state and should not be run without a target. If such a call has
   no `name`, `area` or `floor`, and the current or previous user message did not
   say "alle", the call is blocked and the model receives the configured reply
-  instead of executing it.
+  instead of executing it. Home Assistant namespaces the tools it offers
+  (`intent__HassTurnOff`, `homeassistant__GetLiveContext`); the prefix is
+  ignored on both sides, so the bare name belongs here. The effective list is
+  logged at start as `switching tools: [...]`.
 - `switching_block_reply`
   (`"Welches Gerät oder welchen Bereich meinst du genau?"`): the reply sent to
   the model when an untargeted switching call is blocked. Change it for a
