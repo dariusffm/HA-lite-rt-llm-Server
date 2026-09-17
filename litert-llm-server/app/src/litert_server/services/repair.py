@@ -56,6 +56,11 @@ def find_entity(user_text: str, entities: list[Entity]) -> tuple[Entity | None, 
     return distinct[0][1], "ok"
 
 
+def _tool_key(name: str) -> str:
+    """Strip HA's namespace prefix: ``intent__HassTurnOff`` -> ``HassTurnOff``."""
+    return name.rsplit("__", 1)[-1]
+
+
 def _has_name_parameter(tool: ToolSpec) -> bool:
     props = tool.parameters.get("properties")
     return isinstance(props, dict) and "name" in props
@@ -65,7 +70,7 @@ def repair_call(
     call: ToolCall, tools: list[ToolSpec], user_text: str, entities: list[Entity]
 ) -> tuple[ToolCall, str]:
     """Return the repaired call and ``"ok"``, or the untouched call and why."""
-    tool = next((t for t in tools if t.name == call.name), None)
+    tool = next((t for t in tools if _tool_key(t.name) == _tool_key(call.name)), None)
     if tool is None or not _has_name_parameter(tool):
         return call, "no name parameter"
     if call.arguments.get("name"):
@@ -92,11 +97,6 @@ def _catalogue(messages: list[ChatTurn]) -> list[Entity] | None:
     return None
 
 
-def _tool_key(name: str) -> str:
-    """Strip HA's namespace prefix: ``intent__HassTurnOff`` -> ``HassTurnOff``."""
-    return name.rsplit("__", 1)[-1]
-
-
 def _is_untargeted_switching(call: ToolCall, switching_tools: set[str]) -> bool:
     return _tool_key(call.name) in switching_tools and not any(
         call.arguments.get(k) for k in ("name", *_TARGET_KEYS)
@@ -119,7 +119,7 @@ class ToolCallRepairService:
     ) -> None:
         self._inner = inner
         self._switching_tools = {
-            _tool_key(t) for t in (switching_tools or {"HassTurnOff", "HassToggle"})
+            _tool_key(t) for t in (switching_tools or {"HassTurnOn", "HassTurnOff", "HassToggle"})
         }
         self._block_reply = block_reply or "Welches Gerät oder welchen Bereich meinst du genau?"
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0 — 2026-09-17
+
+- `HassTurnOn` is a switching tool by default. An untargeted `HassTurnOn`
+  switched on *every* matching entity the same way `HassTurnOff` switched them
+  off; only the off direction was guarded. Repair still runs first, so a call
+  the user's text can pin to one entity is executed as before — only calls
+  with no target at all are blocked.
+- Tool specs are matched by the bare name as well, so repair keeps working if
+  Home Assistant ever namespaces a call differently from its spec.
+- Fix: `preload_models` had the same defect as `switching_tool_names` before
+  0.4.9 — `bashio::config` prints a list one raw element per line and only the
+  first line survived into the environment, so a configured model list broke
+  the start. Both options now go through one `config_list` helper.
+
 ## 0.4.9 — 2026-09-17
 
 - Fix: untargeted switching calls were never blocked on a real HA host.

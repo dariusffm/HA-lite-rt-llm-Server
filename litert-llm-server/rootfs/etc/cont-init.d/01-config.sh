@@ -3,6 +3,13 @@ set -euo pipefail
 
 bashio::log.info "Reading add-on configuration..."
 
+# bashio prints a list as one raw element per line. The loop that persists the
+# env vars for s6 keeps only a value's first line, so every list option has to
+# become single-line JSON here — which is also what pydantic-settings parses.
+config_list() {
+    bashio::config "${1}" | jq -R -s -c 'split("\n") | map(select(length > 0))'
+}
+
 export LITERT_LOG_LEVEL="$(bashio::config 'log_level')"
 export LITERT_DEFAULT_MODEL="$(bashio::config 'default_model')"
 export LITERT_MAX_TOKENS="$(bashio::config 'max_tokens')"
@@ -12,10 +19,7 @@ export LITERT_CONTEXT_LENGTH="$(bashio::config 'context_length')"
 export LITERT_PROMPT_COMPACTION="$(bashio::config 'prompt_compaction')"
 export LITERT_CONVERSATION_TTL="$(bashio::config 'conversation_ttl')"
 export LITERT_TOOL_CALL_REPAIR="$(bashio::config 'tool_call_repair')"
-# bashio prints a list as one raw element per line; pack it into single-line
-# JSON, because the persistence loop below keeps only a value's first line.
-LITERT_SWITCHING_TOOL_NAMES="$(bashio::config 'switching_tool_names' \
-    | jq -R -s -c 'split("\n") | map(select(length > 0))')"
+LITERT_SWITCHING_TOOL_NAMES="$(config_list 'switching_tool_names')"
 export LITERT_SWITCHING_TOOL_NAMES
 bashio::log.info "switching tools: ${LITERT_SWITCHING_TOOL_NAMES}"
 export LITERT_SWITCHING_BLOCK_REPLY="$(bashio::config 'switching_block_reply')"
@@ -23,7 +27,7 @@ export LITERT_GENERATION_TIMEOUT="$(bashio::config 'generation_timeout')"
 export LITERT_MODELS_DIR="/data/models"
 export LITERT_PORT="8080"
 
-LITERT_PRELOAD_MODELS="$(bashio::config 'preload_models')"
+LITERT_PRELOAD_MODELS="$(config_list 'preload_models')"
 export LITERT_PRELOAD_MODELS
 
 # HuggingFace token: exported as HF_TOKEN (the env var huggingface_hub

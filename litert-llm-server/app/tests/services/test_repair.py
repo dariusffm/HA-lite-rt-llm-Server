@@ -217,7 +217,7 @@ async def test_service_repairs_from_previous_user_message_when_last_names_no_ent
 
 async def test_service_does_not_fall_back_when_last_message_is_ambiguous():
     inner = ScriptedEngine(replies=[[_tool_call(domain=["light"])]])
-    svc = ToolCallRepairService(inner)
+    svc = ToolCallRepairService(inner, switching_tools={"HassToggle"})
     messages = [
         _SYSTEM,
         ChatTurn(role="user", content="Komode1 an"),
@@ -232,7 +232,7 @@ async def test_service_does_not_fall_back_when_last_message_is_ambiguous():
 
 async def test_service_does_not_fall_back_without_a_previous_user_message():
     inner = ScriptedEngine(replies=[[_tool_call(domain=["light"])]])
-    svc = ToolCallRepairService(inner)
+    svc = ToolCallRepairService(inner, switching_tools={"HassToggle"})
     messages = [_SYSTEM, ChatTurn(role="user", content="mach das Licht an")]
 
     tokens = await _drain(svc, messages)
@@ -433,3 +433,36 @@ async def test_service_leaves_namespaced_read_tool_alone():
     tokens = await _drain(svc, messages, tools=[namespaced])
 
     assert tokens[0].tool_calls == [call]
+
+
+async def test_service_blocks_untargeted_turn_on(caplog: pytest.LogCaptureFixture):
+    """An untargeted HassTurnOn would switch on every light, same as TurnOff."""
+    caplog.set_level(logging.WARNING, logger="litert_server.services.repair")
+    call = _tool_call("intent__HassTurnOn", domain=["light"])
+    inner = ScriptedEngine(replies=[[call]])
+    svc = ToolCallRepairService(inner)
+    messages = [_SYSTEM, ChatTurn(role="user", content="Mach doch mal das Licht an.")]
+
+    tokens = await _drain(svc, messages, tools=[_TURN_ON])
+
+    assert tokens[0].tool_calls is None
+    assert tokens[0].text == "Welches Gerät oder welchen Bereich meinst du genau?"
+    assert "tool call blocked: intent__HassTurnOn without name/area/floor" in caplog.text
+
+
+async def test_service_still_repairs_a_named_turn_on():
+    """Repair runs before the block, so a named entity is switched as before."""
+    call = _tool_call("intent__HassTurnOn", domain=["light"], device_class=["switch"])
+    inner = ScriptedEngine(replies=[[call]])
+    svc = ToolCallRepairService(inner)
+    messages = [
+        _SYSTEM,
+        ChatTurn(role="user", content="Mach die Wohnzimmer-Fenster-Lampe an"),
+    ]
+
+    tokens = await _drain(svc, messages, tools=[_TURN_ON])
+
+    assert tokens[-1].tool_calls[0].arguments == {
+        "name": "Wohnzimmer-Fenster-Lampe",
+        "domain": ["light"],
+    }
