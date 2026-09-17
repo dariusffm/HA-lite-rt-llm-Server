@@ -37,6 +37,33 @@ def test_build_stage_one_turns_lists_domains_and_areas_and_question():
     assert turns[1].content == "Welche Lampen sind an?"
 
 
+def test_build_stage_one_turns_prefixes_the_previous_question_when_given():
+    turns = build_stage_one_turns(
+        "Und welche davon sind gerade eingeschaltet?",
+        ["light", "switch"],
+        ["Bad"],
+        previous_question="Welche Geräte gibt es in der Küche?",
+    )
+
+    assert turns[1].content == (
+        "Previous question: Welche Geräte gibt es in der Küche?\n"
+        "Question: Und welche davon sind gerade eingeschaltet?"
+    )
+
+
+def test_build_stage_one_turns_only_permits_empty_lists_for_non_home_questions():
+    """Since stage-1's empty selection compacts to zero entities (no full-prompt
+    fallback), the model must not read an empty list as a safe default for an
+    unsure home question — only for questions that aren't about the home."""
+    turns = build_stage_one_turns("Welche Lampen sind an?", ["light", "switch"], ["Bad"])
+
+    assert "Use an empty list when unsure." not in turns[0].content
+    assert (
+        "Return empty lists only if the question is not about the home "
+        "(small talk, math, general knowledge)." in turns[0].content
+    )
+
+
 def test_stage_one_params_force_pattern_and_determinism():
     assert STAGE_ONE_PARAMS.temperature == 0.0
     assert STAGE_ONE_PARAMS.max_tokens == 96

@@ -22,7 +22,7 @@ options:
   prompt_compaction: auto
   conversation_ttl: 300
   tool_call_repair: true
-  generation_timeout: 120
+  generation_timeout: 240
   preload_models: []
   hf_token: ""
 schema:

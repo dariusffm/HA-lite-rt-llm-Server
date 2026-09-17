@@ -28,7 +28,9 @@ _SYSTEM_TEMPLATE = (
     "You route smart-home questions. Pick which entities are needed to answer.\n"
     "Domains available: {domains}\n"
     "Areas available: {areas}\n"
-    "Return only what the question needs. Use an empty list when unsure."
+    "If the question refers back to it, resolve references using the previous question.\n"
+    "Return only what the question needs. Return empty lists only if the question "
+    "is not about the home (small talk, math, general knowledge)."
 )
 
 
@@ -51,11 +53,21 @@ def available_areas(entities: list[Entity]) -> list[str]:
     return _unique_sorted([a for e in entities for a in entity_areas(e)])
 
 
-def build_stage_one_turns(question: str, domains: list[str], areas: list[str]) -> list[ChatTurn]:
+def build_stage_one_turns(
+    question: str,
+    domains: list[str],
+    areas: list[str],
+    previous_question: str | None = None,
+) -> list[ChatTurn]:
     system = _SYSTEM_TEMPLATE.format(
         domains=", ".join(domains) or "none", areas=", ".join(areas) or "none"
     )
-    return [ChatTurn(role="system", content=system), ChatTurn(role="user", content=question)]
+    content = (
+        question
+        if previous_question is None
+        else f"Previous question: {previous_question}\nQuestion: {question}"
+    )
+    return [ChatTurn(role="system", content=system), ChatTurn(role="user", content=content)]
 
 
 def _string_set(value: Any) -> frozenset[str] | None:

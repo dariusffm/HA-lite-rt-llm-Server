@@ -135,6 +135,97 @@ def test_compact_live_context_handles_ha_json_envelope():
     assert data["result"].startswith("Live Context (compact):\n")
 
 
+def test_compact_live_context_translates_binary_sensor_window_on_to_open():
+    live = (
+        "Live Context: An overview of the areas and the devices in this smart home:\n"
+        "- names: GaesteWC-Window\n  domain: binary_sensor\n  state: 'on'\n"
+        "  attributes:\n    device_class: window\n"
+    )
+
+    out = compact_live_context(live)
+
+    assert out == ("Live Context (compact):\nGaesteWC-Window [binary_sensor]: open")
+
+
+def test_compact_live_context_translates_binary_sensor_motion_off_to_clear():
+    live = (
+        "Live Context: An overview of the areas and the devices in this smart home:\n"
+        "- names: Flur Bewegung\n  domain: binary_sensor\n  state: 'off'\n"
+        "  attributes:\n    device_class: motion\n"
+    )
+
+    out = compact_live_context(live)
+
+    assert out == ("Live Context (compact):\nFlur Bewegung [binary_sensor]: clear")
+
+
+def test_compact_live_context_translated_binary_sensor_keeps_other_attributes():
+    """Only the now-redundant ``device_class`` is dropped from the tail —
+    other attributes on a translated binary_sensor are kept."""
+    live = (
+        "Live Context: An overview of the areas and the devices in this smart home:\n"
+        "- names: GaesteWC-Window\n  domain: binary_sensor\n  state: 'on'\n"
+        "  attributes:\n    device_class: window\n    battery_level: 87\n"
+    )
+
+    out = compact_live_context(live)
+
+    assert out == (
+        "Live Context (compact):\nGaesteWC-Window [binary_sensor]: open, battery_level=87"
+    )
+
+
+def test_compact_live_context_leaves_unavailable_binary_sensor_state_as_is():
+    live = (
+        "Live Context: An overview of the areas and the devices in this smart home:\n"
+        "- names: GaesteWC-Window\n  domain: binary_sensor\n  state: unavailable\n"
+        "  attributes:\n    device_class: window\n"
+    )
+
+    out = compact_live_context(live)
+
+    assert out == (
+        "Live Context (compact):\nGaesteWC-Window [binary_sensor]: unavailable, device_class=window"
+    )
+
+
+def test_compact_live_context_leaves_binary_sensor_on_off_as_is_for_unknown_device_class():
+    live = (
+        "Live Context: An overview of the areas and the devices in this smart home:\n"
+        "- names: Mystery Sensor\n  domain: binary_sensor\n  state: 'on'\n"
+        "  attributes:\n    device_class: unknown_class\n"
+    )
+
+    out = compact_live_context(live)
+
+    assert out == (
+        "Live Context (compact):\nMystery Sensor [binary_sensor]: on, device_class=unknown_class"
+    )
+
+
+def test_compact_live_context_leaves_binary_sensor_on_off_as_is_without_device_class():
+    live = (
+        "Live Context: An overview of the areas and the devices in this smart home:\n"
+        "- names: No Class Sensor\n  domain: binary_sensor\n  state: 'on'\n"
+    )
+
+    out = compact_live_context(live)
+
+    assert out == "Live Context (compact):\nNo Class Sensor [binary_sensor]: on"
+
+
+def test_compact_live_context_translates_unquoted_yaml_boolean_binary_sensor_state():
+    live = (
+        "Live Context: An overview of the areas and the devices in this smart home:\n"
+        "- names: GaesteWC-Window\n  domain: binary_sensor\n  state: on\n"
+        "  attributes:\n    device_class: door\n"
+    )
+
+    out = compact_live_context(live)
+
+    assert out == ("Live Context (compact):\nGaesteWC-Window [binary_sensor]: open")
+
+
 def test_compact_live_context_returns_none_for_other_tool_results():
     assert compact_live_context("The weather is sunny.") is None
     assert compact_live_context(json.dumps({"success": True, "result": "done"})) is None

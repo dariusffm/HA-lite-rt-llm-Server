@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     prompt_compaction: Literal["off", "on", "auto"] = "auto"
     conversation_ttl: int = Field(default=300, ge=0, le=3600)
     tool_call_repair: bool = True
-    generation_timeout: int = Field(default=120, ge=0, le=600)
+    generation_timeout: int = Field(default=240, ge=0, le=600)
     hf_token: str | None = Field(default=None, validation_alias="HF_TOKEN")
 
     @field_validator("preload_models", mode="before")

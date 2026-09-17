@@ -117,9 +117,9 @@ def test_generation_timeout_env(monkeypatch):
     assert Settings().generation_timeout == 60
 
 
-def test_generation_timeout_defaults_to_120(monkeypatch):
+def test_generation_timeout_defaults_to_240(monkeypatch):
     monkeypatch.delenv("LITERT_GENERATION_TIMEOUT", raising=False)
-    assert Settings().generation_timeout == 120
+    assert Settings().generation_timeout == 240
 
 
 def test_generation_timeout_rejects_out_of_range(monkeypatch):

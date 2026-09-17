@@ -7,7 +7,7 @@ import logging
 
 import pytest
 
-from litert_server.domain.types import ChatTurn, GenerationParams, ToolSpec
+from litert_server.domain.types import ChatTurn, GenerationParams, ToolCall, ToolSpec
 from litert_server.services.compaction import CompactingInferenceService
 from litert_server.services.ha_prompt import FILTER_NOTE, STATIC_MARKER
 from tests.fakes.scripted_engine import ScriptedEngine
@@ -32,6 +32,9 @@ LIVE = (
     "Live Context: An overview of the areas and the devices in this smart home:\n"
     "- names: Wohnzimmer Lampe\n  domain: light\n  state: 'on'\n  areas: Wohnzimmer\n"
 )
+FIRST_QUESTION = ChatTurn(role="user", content="Welche Geräte gibt es in der Küche?")
+ASSISTANT_REPLY = ChatTurn(role="assistant", content="Steckdose-Kueche")
+FOLLOW_UP = ChatTurn(role="user", content="Und welche davon sind gerade eingeschaltet?")
 
 
 async def _run(svc: CompactingInferenceService, messages: list[ChatTurn], tools=TOOLS) -> str:
@@ -119,6 +122,37 @@ async def test_empty_stage_one_selection_compacts_to_zero_entities_instead_of_sk
     assert "entities 3→0" in caplog.text
 
 
+async def test_empty_selection_from_non_empty_query_logs_the_query_for_diagnosis(
+    caplog: pytest.LogCaptureFixture,
+):
+    """A stage-1 reply that names a domain/area/name but still matches
+    nothing (e.g. a hallucinated domain) is otherwise indistinguishable in
+    the log from a genuinely empty stage-1 answer — the query itself must be
+    logged so the 0-entity case is diagnosable."""
+    inner = ScriptedEngine(replies=[COVER_ONLY, "ok"])
+    svc = CompactingInferenceService(inner)
+
+    with caplog.at_level(logging.INFO, logger="litert_server.services.compaction"):
+        await _run(svc, [SYSTEM, QUESTION])
+
+    assert "entities 3→0" in caplog.text
+    assert "0 matches for stage-1 query domains=['cover'] areas=[] names=[]" in caplog.text
+
+
+async def test_fully_empty_stage_one_query_does_not_log_query_diagnostics(
+    caplog: pytest.LogCaptureFixture,
+):
+    inner = ScriptedEngine(
+        replies=[json.dumps({"domains": [], "areas": [], "names": []}), "ok"]
+    )
+    svc = CompactingInferenceService(inner)
+
+    with caplog.at_level(logging.INFO, logger="litert_server.services.compaction"):
+        await _run(svc, [SYSTEM, QUESTION])
+
+    assert "0 matches for stage-1 query" not in caplog.text
+
+
 async def test_empty_stage_one_selection_is_cached_for_a_follow_up_tool_round():
     inner = ScriptedEngine(
         replies=[json.dumps({"domains": [], "areas": [], "names": []}), "a", "b"]
@@ -204,6 +238,64 @@ async def test_stage_one_uses_last_user_turn_even_when_tool_result_is_last():
     await _run(svc, [SYSTEM, QUESTION, ChatTurn(role="assistant", content=""), live])
 
     assert inner.chat_calls[0].messages[-1].content == QUESTION.content
+
+
+async def test_stage_one_input_includes_previous_user_message_for_followups():
+    inner = ScriptedEngine(replies=[LIGHTS_ONLY, "ok"])
+    svc = CompactingInferenceService(inner)
+
+    await _run(svc, [SYSTEM, FIRST_QUESTION, ASSISTANT_REPLY, FOLLOW_UP])
+
+    stage1 = inner.chat_calls[0]
+    assert stage1.messages[-1].content == (
+        f"Previous question: {FIRST_QUESTION.content}\nQuestion: {FOLLOW_UP.content}"
+    )
+
+
+async def test_stage_one_input_is_just_the_question_without_a_previous_user_turn():
+    inner = ScriptedEngine(replies=[LIGHTS_ONLY, "ok"])
+    svc = CompactingInferenceService(inner)
+
+    await _run(svc, [SYSTEM, QUESTION])
+
+    assert inner.chat_calls[0].messages[-1].content == QUESTION.content
+
+
+async def test_cache_key_includes_previous_user_message_so_different_conversations_dont_share_it():
+    inner = ScriptedEngine(replies=[LIGHTS_ONLY, "a", COVER_ONLY, "b"])
+    svc = CompactingInferenceService(inner)
+    other_first_question = ChatTurn(role="user", content="Welche Geräte gibt es im Keller?")
+
+    await _run(svc, [SYSTEM, FIRST_QUESTION, ASSISTANT_REPLY, FOLLOW_UP])
+    await _run(svc, [SYSTEM, other_first_question, ASSISTANT_REPLY, FOLLOW_UP])
+
+    assert len(inner.chat_calls) == 4  # stage 1 ran again despite identical follow-up text
+
+
+async def test_follow_up_turns_tool_round_hits_the_stage_one_cache():
+    """A follow-up question that itself triggers a tool round (model calls
+    GetLiveContext again for it) still has FOLLOW_UP as the last user turn on
+    the second `stream_chat` call — stage 1 must reuse the cached answer
+    instead of asking again."""
+    inner = ScriptedEngine(replies=[LIGHTS_ONLY, "a", "b"])
+    svc = CompactingInferenceService(inner)
+    first_round = [SYSTEM, FIRST_QUESTION, ASSISTANT_REPLY, FOLLOW_UP]
+    assistant_tool_call = ChatTurn(
+        role="assistant",
+        content="",
+        tool_calls=[ToolCall(id="1", name="GetLiveContext", arguments={})],
+    )
+    tool_result = ChatTurn(
+        role="tool",
+        content=json.dumps({"success": True, "result": LIVE}),
+        tool_name="GetLiveContext",
+    )
+    second_round = [*first_round, assistant_tool_call, tool_result]
+
+    await _run(svc, first_round)
+    await _run(svc, second_round)
+
+    assert len(inner.chat_calls) == 3  # stage 1 once, stage 2 twice
 
 
 async def test_stream_completion_is_passthrough():

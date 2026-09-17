@@ -100,12 +100,21 @@ if compaction_enabled(settings):
 You route smart-home questions. Pick which entities are needed to answer.
 Domains available: <aus dem Prompt gesammelt, kommagetrennt>
 Areas available: <aus dem Prompt gesammelt, kommagetrennt>
-Return only what the question needs. Use an empty list when unsure.
+Return only what the question needs. Return empty lists only if the question
+is not about the home (small talk, math, general knowledge).
 ```
 
 **User-Turn:** die letzte `user`-Nachricht des Requests. Bei Folgeturns
 (Tool-Ergebnis als letzte Nachricht) bleibt die letzte `user`-Nachricht die
-Referenz.
+Referenz. Gibt es davor eine weitere `user`-Nachricht (assistant/tool-Turns
+zählen nicht), wird genau diese eine vorherige Frage mitgeschickt, damit
+elliptische Anschlussfragen ("und welche davon?") auflösbar sind: `Previous
+question: <vorherige Frage>\nQuestion: <aktuelle Frage>`. Ohne vorherige
+`user`-Nachricht bleibt der User-Turn unverändert die aktuelle Frage allein.
+Der Rückbezug ist bewusst auf einen Hop begrenzt: nur die unmittelbar
+vorherige `user`-Nachricht wird mitgeschickt. Verkettete Ellipsen über
+mehrere Turns hinweg werden nicht aufgelöst; die gesamte Historie
+anzuhängen wird bewusst vermieden (Prefill-Kosten auf der Zielhardware).
 
 **Ausgabe:** JSON, erzwungen über `GenerationParams.response_pattern` (eine
 Regex, die die Antwort vollständig matchen muss) und constrained decoding
@@ -141,8 +150,11 @@ existiert im Prompt), ist das eine gültige Antwort, kein Fehler: es wird
 Entitätenliste kompaktiert (`entities 176→0`) und wie jede andere
 Stufe-1-Antwort gecacht.
 
-**Cache:** `dict[str, StageOneResult]` Fragetext → Ergebnis, max. 64 Einträge,
-FIFO. Kein Ablauf.
+**Cache:** `dict[(Fragetext, vorherige Frage, Domänen, Bereiche), StageOneResult]`,
+max. 64 Einträge, FIFO. Kein Ablauf. Die vorherige Frage ist Teil des
+Schlüssels, damit zwei Conversations mit derselben Anschlussfrage ("und
+welche davon?") sich nicht dieselbe gecachte Antwort teilen; Tool-Runden
+desselben Turns (gleicher `user`-Nachrichten-Präfix) treffen den Cache weiter.
 
 **Spike (erledigt, `docs/benchmarks/2026-09-16-json-schema-spike.md`):**
 JSON-Schema-Modus negativ, Regex-Modus positiv; daher `response_pattern`.

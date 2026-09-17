@@ -53,7 +53,7 @@ with HTTP 401.
 | `context_length` | 8192 | Engine context window in tokens (2048–32768); prompt + completion must fit |
 | `conversation_ttl` | 300 | Seconds an idle conversation's KV cache is kept for reuse across tool rounds and follow-ups; `0` disables reuse |
 | `tool_call_repair` | true | Fill in the entity `name` of a tool call from the user's words when the model left it out |
-| `generation_timeout` | 120 | Seconds a single generation may run before it is cancelled; `0` disables |
+| `generation_timeout` | 240 | Seconds a single generation may run before it is cancelled; `0` disables |
 | `preload_models` | `[]` | Model names to pull on startup |
 | `tool_calling` | true | Ignore/accept client tool definitions (see DOCS) |
 | `hf_token` | `""` | HuggingFace read token; required only for gated `google/*` models |

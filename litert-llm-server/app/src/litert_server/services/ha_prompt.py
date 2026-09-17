@@ -23,6 +23,39 @@ FILTER_NOTE = (
 )
 _COMPACT_HEADER = "Live Context (compact):"
 
+# Home Assistant frontend wording for binary_sensor on/off, keyed by device_class.
+# https://www.home-assistant.io/integrations/binary_sensor/#device-class
+_BINARY_SENSOR_STATE_WORDS: dict[str, tuple[str, str]] = {
+    "door": ("open", "closed"),
+    "garage_door": ("open", "closed"),
+    "opening": ("open", "closed"),
+    "window": ("open", "closed"),
+    "motion": ("detected", "clear"),
+    "occupancy": ("detected", "clear"),
+    "presence": ("detected", "clear"),
+    "sound": ("detected", "clear"),
+    "vibration": ("detected", "clear"),
+    "gas": ("detected", "clear"),
+    "smoke": ("detected", "clear"),
+    "carbon_monoxide": ("detected", "clear"),
+    "moving": ("moving", "not moving"),
+    "tamper": ("tampering detected", "clear"),
+    "problem": ("problem", "ok"),
+    "safety": ("unsafe", "safe"),
+    "moisture": ("wet", "dry"),
+    "battery": ("low", "normal"),
+    "battery_charging": ("charging", "not charging"),
+    "cold": ("cold", "normal"),
+    "heat": ("hot", "normal"),
+    "light": ("light detected", "no light"),
+    "lock": ("unlocked", "locked"),
+    "plug": ("plugged in", "unplugged"),
+    "connectivity": ("connected", "disconnected"),
+    "power": ("on", "off"),
+    "running": ("running", "not running"),
+    "update": ("update available", "up-to-date"),
+}
+
 Entity = dict[str, Any]
 
 
@@ -121,13 +154,43 @@ def render_static_context(ctx: StaticContext, entities: list[Entity]) -> str:
     return f"{ctx.head}{STATIC_MARKER}\n{FILTER_NOTE}\n{body}{ctx.tail}"
 
 
+def _binary_sensor_state_word(state: Any, device_class: Any) -> tuple[Any, bool]:
+    """Translate a binary_sensor on/off state into HA frontend wording for
+    ``device_class``. YAML parses quoted ``'on'``/``'off'`` as strings but an
+    unquoted value as a bool, so both are handled. Anything else (unavailable,
+    unknown, unmapped device_class) is returned unchanged. The second return
+    value says whether a translation was applied."""
+    if state is True:
+        state = "on"
+    elif state is False:
+        state = "off"
+    if state not in ("on", "off"):
+        return state, False
+    words = _BINARY_SENSOR_STATE_WORDS.get(device_class)
+    if words is None:
+        return state, False
+    on_word, off_word = words
+    return (on_word if state == "on" else off_word), True
+
+
 def _compact_entity(e: Entity) -> str:
     names = ", ".join(_as_list(e.get("names"))) or "?"
     meta = ", ".join([str(e.get("domain", "?")), *entity_areas(e)])
-    parts = [str(e.get("state", "?"))]
     attributes = e.get("attributes")
+    state = e.get("state", "?")
+    translated = False
+    if e.get("domain") == "binary_sensor":
+        device_class = attributes.get("device_class") if isinstance(attributes, dict) else None
+        state, translated = _binary_sensor_state_word(state, device_class)
+    parts = [str(state)]
     if isinstance(attributes, dict):
-        parts.extend(f"{k}={v}" for k, v in attributes.items() if v not in (None, ""))
+        # device_class is redundant once the state word already encodes it
+        # (e.g. "open" for a door) — drop it from the attribute tail then.
+        parts.extend(
+            f"{k}={v}"
+            for k, v in attributes.items()
+            if v not in (None, "") and not (translated and k == "device_class")
+        )
     return f"{names} [{meta}]: {', '.join(parts)}"
 
 

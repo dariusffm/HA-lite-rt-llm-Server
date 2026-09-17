@@ -229,14 +229,18 @@ Google names two options: **Gemma 4** (E2B/E4B/12B) for agentic chat, and
   `device_class`. Calls that already name a target, an area or a floor are
   left alone, as are ambiguous user texts. Log: `tool call repaired: HassTurnOn
   name='Wohnzimmer-Fenster-Lampe' (from user text)`.
-- `generation_timeout` (`120`): caps how long a single generation (chat or
+- `generation_timeout` (`240`): caps how long a single generation (chat or
   completion) may run. If it is still not finished after the budget,
   the engine calls `cancel_process()`, logs a WARNING with elapsed time,
   chunk count, text chars produced so far and any tool-call fragment
-  (`generation timed out after 120s: …`), and ends the stream with an
+  (`generation timed out after 240s: …`), and ends the stream with an
   error instead of hanging until the client gives up. `0` disables the
   budget. A client disconnecting mid-generation logs the same kind of
-  summary as `generation aborted by client after …`.
+  summary as `generation aborted by client after …`. Raised from 120 to 240
+  because on the HA host a tool call only surfaces as a chunk once fully
+  generated, and prefill + tool-call generation measured 79 s to over 120 s,
+  aborting valid "turn on the lamp" requests at the old budget; 240 s stays
+  below Home Assistant's 300 s client timeout.
 - Single-slot engine: switching models mid-flight triggers a reload.
 - No request queue: concurrent requests serialize.
 - No authentication: rely on HA's internal network.
