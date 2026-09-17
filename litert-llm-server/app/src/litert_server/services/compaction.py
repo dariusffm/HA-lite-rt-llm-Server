@@ -17,10 +17,12 @@ from collections.abc import AsyncIterator
 
 from litert_server.domain.inference import InferenceService, collect_chat
 from litert_server.domain.types import ChatTurn, GenerationParams, Token, ToolSpec
+from litert_server.services.chat_turns import last_two_user_texts
 from litert_server.services.ha_prompt import (
     Entity,
     compact_live_context,
     render_static_context,
+    render_tool_error,
     split_static_context,
 )
 from litert_server.services.relevance import (
@@ -85,11 +87,9 @@ class CompactingInferenceService:
         ctx = split_static_context(messages[0].content)
         if ctx is None:
             return messages
-        user_indices = [i for i, m in enumerate(messages) if m.role == "user"]
-        if not user_indices:
+        question, previous_question = last_two_user_texts(messages)
+        if question is None:
             return messages
-        question = messages[user_indices[-1]].content
-        previous_question = messages[user_indices[-2]].content if len(user_indices) > 1 else None
         try:
             started = time.monotonic()
             query, cached = await self._relevance(model, question, previous_question, ctx.entities)
@@ -118,7 +118,7 @@ class CompactingInferenceService:
         out = [system]
         for turn in messages[1:]:
             if turn.role == "tool":
-                compact = compact_live_context(turn.content)
+                compact = compact_live_context(turn.content) or render_tool_error(turn.content)
                 if compact is not None:
                     compacted += 1
                     turn = turn.model_copy(update={"content": compact})

@@ -178,6 +178,52 @@ async def test_service_uses_last_user_turn_and_passes_text_through():
     assert tokens[-1].tool_calls[0].arguments["name"] == "Wohnzimmer-Fenster-Lampe"
 
 
+async def test_service_repairs_from_previous_user_message_when_last_names_no_entity(
+    caplog: pytest.LogCaptureFixture,
+):
+    caplog.set_level(logging.INFO, logger="litert_server.services.repair")
+    inner = ScriptedEngine(replies=[[_call(domain=["light"], device_class=["switch"])]])
+    svc = ToolCallRepairService(inner)
+    messages = [
+        _SYSTEM,
+        ChatTurn(role="user", content="Bitte schalte die Lampe Komode1 im Wohnzimmer ein."),
+        ChatTurn(role="assistant", content="Erledigt."),
+        ChatTurn(role="user", content="Und jetzt bitte wieder aus."),
+    ]
+
+    tokens = await _drain(svc, messages)
+
+    assert tokens[-1].tool_calls[0].arguments == {"name": "Komode1", "domain": ["light"]}
+    assert (
+        "tool call repaired: HassTurnOn name='Komode1' (from previous user text)" in caplog.text
+    )
+
+
+async def test_service_does_not_fall_back_when_last_message_is_ambiguous():
+    inner = ScriptedEngine(replies=[[_call(domain=["light"])]])
+    svc = ToolCallRepairService(inner)
+    messages = [
+        _SYSTEM,
+        ChatTurn(role="user", content="Komode1 an"),
+        ChatTurn(role="assistant", content="Erledigt."),
+        ChatTurn(role="user", content="Komode1 und Wohnzimmer-Fenster-Lampe an"),
+    ]
+
+    tokens = await _drain(svc, messages)
+
+    assert tokens[-1].tool_calls[0].arguments == {"domain": ["light"]}
+
+
+async def test_service_does_not_fall_back_without_a_previous_user_message():
+    inner = ScriptedEngine(replies=[[_call(domain=["light"])]])
+    svc = ToolCallRepairService(inner)
+    messages = [_SYSTEM, ChatTurn(role="user", content="mach das Licht an")]
+
+    tokens = await _drain(svc, messages)
+
+    assert tokens[-1].tool_calls[0].arguments == {"domain": ["light"]}
+
+
 async def test_service_leaves_calls_alone_without_static_context(caplog: pytest.LogCaptureFixture):
     caplog.set_level(logging.DEBUG, logger="litert_server.services.repair")
     call = _call(domain=["light"])

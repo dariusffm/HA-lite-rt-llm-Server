@@ -17,6 +17,7 @@ from typing import Any
 
 from litert_server.domain.inference import InferenceService
 from litert_server.domain.types import ChatTurn, GenerationParams, Token, ToolCall, ToolSpec
+from litert_server.services.chat_turns import last_two_user_texts
 from litert_server.services.ha_prompt import Entity, entity_names, split_static_context
 
 log = logging.getLogger(__name__)
@@ -81,10 +82,6 @@ def repair_call(
     return ToolCall(id=call.id, name=call.name, arguments=arguments), "ok"
 
 
-def _last_user_text(messages: list[ChatTurn]) -> str:
-    return next((m.content for m in reversed(messages) if m.role == "user"), "")
-
-
 def _catalogue(messages: list[ChatTurn]) -> list[Entity] | None:
     for m in messages:
         if m.role == "system":
@@ -122,15 +119,23 @@ class ToolCallRepairService:
             if entities is None:
                 log.debug("tool call repair skipped: no static context")
                 return tok
-            user_text = _last_user_text(messages)
+            user_text, previous_user_text = last_two_user_texts(messages)
             repaired: list[ToolCall] = []
             for call in tok.tool_calls or []:
-                fixed, reason = repair_call(call, tools, user_text, entities)
+                fixed, reason = repair_call(call, tools, user_text or "", entities)
+                source = "from user text"
+                if reason == "no known entity in user text" and previous_user_text is not None:
+                    retried, retry_reason = repair_call(
+                        call, tools, previous_user_text, entities
+                    )
+                    if retry_reason == "ok":
+                        fixed, reason, source = retried, retry_reason, "from previous user text"
                 if reason == "ok":
                     log.info(
-                        "tool call repaired: %s name=%r (from user text)",
+                        "tool call repaired: %s name=%r (%s)",
                         fixed.name,
                         fixed.arguments["name"],
+                        source,
                     )
                 else:
                     log.debug("tool call repair skipped: %s", reason)

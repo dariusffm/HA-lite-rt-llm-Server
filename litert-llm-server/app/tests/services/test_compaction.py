@@ -230,6 +230,71 @@ async def test_live_context_tool_turns_are_compacted_but_other_turns_untouched()
     assert sent[3].tool_name == "GetLiveContext"
 
 
+_MATCH_FAILED_ERROR_TEXT = (
+    "<MatchFailedError result=MatchTargetsResult(is_match=False, "
+    "no_match_reason=<MatchFailedReason.DEVICE_CLASS: 5>, states=[], no_match_name=None, "
+    "areas=[], floors=[]), "
+    "constraints=MatchTargetsConstraints(name=None, area_name=None, floor_name=None, "
+    "domains={'light'}, device_classes={'switch'}, features=None, states=None, "
+    "assistant='conversation', allow_duplicate_names=False, single_target=False), "
+    "preferences=MatchTargetsPreferences(area_id=None, floor_id=None)>"
+)
+_MATCH_FAILED_JSON = json.dumps(
+    {"error": "MatchFailedError", "error_text": _MATCH_FAILED_ERROR_TEXT}
+)
+_RENDERED_MATCH_FAILED = (
+    "Tool call FAILED: no device matched (domain=light, device_class=switch). "
+    "Nothing was changed. Tell the user it did not work."
+)
+
+
+async def test_ha_intent_error_tool_turn_is_rendered_short_and_counted(
+    caplog: pytest.LogCaptureFixture,
+):
+    inner = ScriptedEngine(replies=[LIGHTS_ONLY, "ok"])
+    svc = CompactingInferenceService(inner)
+    assistant = ChatTurn(role="assistant", content="", tool_calls=None)
+    failed = ChatTurn(role="tool", content=_MATCH_FAILED_JSON, tool_name="HassTurnOff")
+
+    with caplog.at_level(logging.INFO, logger="litert_server.services.compaction"):
+        await _run(svc, [SYSTEM, QUESTION, assistant, failed])
+
+    sent = inner.chat_calls[-1].messages
+    assert sent[3].content == _RENDERED_MATCH_FAILED
+    assert sent[3].tool_name == "HassTurnOff"
+    assert "tool turns compacted 1" in caplog.text
+
+
+async def test_ha_intent_error_tool_turn_wrapped_in_envelope_is_rendered():
+    inner = ScriptedEngine(replies=[LIGHTS_ONLY, "ok"])
+    svc = CompactingInferenceService(inner)
+    assistant = ChatTurn(role="assistant", content="", tool_calls=None)
+    failed = ChatTurn(
+        role="tool",
+        content=json.dumps({"success": False, "result": _MATCH_FAILED_JSON}),
+        tool_name="HassTurnOff",
+    )
+
+    await _run(svc, [SYSTEM, QUESTION, assistant, failed])
+
+    sent = inner.chat_calls[-1].messages
+    assert sent[3].content == _RENDERED_MATCH_FAILED
+
+
+async def test_successful_tool_result_is_left_untouched():
+    inner = ScriptedEngine(replies=[LIGHTS_ONLY, "ok"])
+    svc = CompactingInferenceService(inner)
+    assistant = ChatTurn(role="assistant", content="", tool_calls=None)
+    success = ChatTurn(
+        role="tool", content=json.dumps({"success": True, "result": "done"}), tool_name="HassTurnOn"
+    )
+
+    await _run(svc, [SYSTEM, QUESTION, assistant, success])
+
+    sent = inner.chat_calls[-1].messages
+    assert sent[3] == success
+
+
 async def test_stage_one_uses_last_user_turn_even_when_tool_result_is_last():
     inner = ScriptedEngine(replies=[LIGHTS_ONLY, "ok"])
     svc = CompactingInferenceService(inner)

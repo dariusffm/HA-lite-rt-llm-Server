@@ -13,6 +13,7 @@ from litert_server.services.ha_prompt import (
     entity_areas,
     entity_names,
     render_static_context,
+    render_tool_error,
     split_static_context,
 )
 
@@ -247,3 +248,97 @@ def test_filter_note_is_one_line_and_names_sensor_domain():
     # One line: _split_yaml_block skips the note by exact line match.
     assert "\n" not in FILTER_NOTE
     assert "domain sensor" in FILTER_NOTE
+
+
+# --- render_tool_error ----------------------------------------------------------
+
+_MATCH_FAILED_ERROR_TEXT = (
+    "<MatchFailedError result=MatchTargetsResult(is_match=False, "
+    "no_match_reason=<MatchFailedReason.DEVICE_CLASS: 5>, states=[], no_match_name=None, "
+    "areas=[], floors=[]), "
+    "constraints=MatchTargetsConstraints(name=None, area_name=None, floor_name=None, "
+    "domains={'light'}, device_classes={'switch'}, features=None, states=None, "
+    "assistant='conversation', allow_duplicate_names=False, single_target=False), "
+    "preferences=MatchTargetsPreferences(area_id=None, floor_id=None)>"
+)
+_MATCH_FAILED_JSON = json.dumps(
+    {"error": "MatchFailedError", "error_text": _MATCH_FAILED_ERROR_TEXT}
+)
+
+
+def test_render_tool_error_renders_match_failed_error_direct():
+    out = render_tool_error(_MATCH_FAILED_JSON)
+
+    assert out == (
+        "Tool call FAILED: no device matched (domain=light, device_class=switch). "
+        "Nothing was changed. Tell the user it did not work."
+    )
+
+
+def test_render_tool_error_renders_match_failed_error_wrapped_in_envelope():
+    content = json.dumps({"success": False, "result": _MATCH_FAILED_JSON})
+
+    out = render_tool_error(content)
+
+    assert out == (
+        "Tool call FAILED: no device matched (domain=light, device_class=switch). "
+        "Nothing was changed. Tell the user it did not work."
+    )
+
+
+def test_render_tool_error_renders_match_failed_error_with_name_and_area():
+    error_text = (
+        "<MatchFailedError result=MatchTargetsResult(is_match=False, "
+        "no_match_reason=<MatchFailedReason.NAME: 1>, states=[], no_match_name=None, "
+        "areas=[], floors=[]), "
+        "constraints=MatchTargetsConstraints(name='Komode1', area_name='Wohnzimmer', "
+        "floor_name=None, domains={'light'}, device_classes=None, features=None, "
+        "states=None, assistant='conversation', allow_duplicate_names=False, "
+        "single_target=False), preferences=MatchTargetsPreferences(area_id=None, floor_id=None)>"
+    )
+    content = json.dumps({"error": "MatchFailedError", "error_text": error_text})
+
+    out = render_tool_error(content)
+
+    assert out == (
+        "Tool call FAILED: no device matched (name=Komode1, area=Wohnzimmer, domain=light). "
+        "Nothing was changed. Tell the user it did not work."
+    )
+
+
+def test_render_tool_error_renders_generic_error():
+    content = json.dumps({"error": "HomeAssistantError", "error_text": "Entity not found: x"})
+
+    out = render_tool_error(content)
+
+    assert out == (
+        "Tool call FAILED: HomeAssistantError: Entity not found: x. "
+        "Nothing was changed. Tell the user it did not work."
+    )
+
+
+def test_render_tool_error_truncates_long_error_text():
+    content = json.dumps({"error": "HomeAssistantError", "error_text": "x" * 500})
+
+    out = render_tool_error(content)
+
+    assert out == (
+        "Tool call FAILED: HomeAssistantError: " + "x" * 200 + ". "
+        "Nothing was changed. Tell the user it did not work."
+    )
+
+
+def test_render_tool_error_returns_none_for_success_result():
+    assert render_tool_error(json.dumps({"success": True, "result": "done"})) is None
+
+
+def test_render_tool_error_returns_none_for_live_context():
+    assert render_tool_error(LIVE) is None
+
+
+def test_render_tool_error_returns_none_for_plain_text():
+    assert render_tool_error("The weather is sunny.") is None
+
+
+def test_render_tool_error_returns_none_for_unrelated_json():
+    assert render_tool_error(json.dumps({"foo": "bar"})) is None

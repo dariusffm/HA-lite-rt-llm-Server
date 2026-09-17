@@ -9,6 +9,7 @@ fall back to the untouched text (spec R3/R4).
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -204,6 +205,72 @@ def _compact_live_text(text: str) -> str | None:
     if entities is None:
         return None
     return "\n".join([_COMPACT_HEADER, *(_compact_entity(e) for e in entities)])
+
+
+_CONSTRAINT_FIELD_RE = re.compile(r"(\w+)=(\{[^}]*\}|'[^']*'|None)")
+
+
+def _constraint_fields(error_text: str) -> dict[str, str]:
+    return {k: v for k, v in _CONSTRAINT_FIELD_RE.findall(error_text) if v != "None"}
+
+
+def _constraint_set(value: str | None) -> list[str]:
+    return re.findall(r"'([^']*)'", value) if value else []
+
+
+def _match_failed_constraints(error_text: str) -> str:
+    fields = _constraint_fields(error_text)
+    parts = []
+    for key, label in (("name", "name"), ("area_name", "area"), ("floor_name", "floor")):
+        value = fields.get(key)
+        if value:
+            parts.append(f"{label}={value.strip(chr(39))}")
+    for key, label in (("domains", "domain"), ("device_classes", "device_class")):
+        values = _constraint_set(fields.get(key))
+        if values:
+            parts.append(f"{label}={','.join(values)}")
+    return ", ".join(parts)
+
+
+def _render_error(error: dict[str, Any]) -> str | None:
+    kind = error.get("error")
+    if not isinstance(kind, str):
+        return None
+    error_text = str(error.get("error_text", ""))
+    if kind == "MatchFailedError":
+        constraints = _match_failed_constraints(error_text)
+        detail = f" ({constraints})" if constraints else ""
+        return (
+            f"Tool call FAILED: no device matched{detail}. "
+            "Nothing was changed. Tell the user it did not work."
+        )
+    return (
+        f"Tool call FAILED: {kind}: {error_text[:200]}. "
+        "Nothing was changed. Tell the user it did not work."
+    )
+
+
+def render_tool_error(content: str) -> str | None:
+    """Render an HA intent-handler error (``{"error": ..., "error_text": ...}``,
+    e.g. ``MatchFailedError``) as a short, unmistakable line for the model.
+
+    Accepts the bare JSON error object or HA's envelope
+    ``{"success": …, "result": …}`` with the error JSON-encoded in ``result``.
+    Returns ``None`` when ``content`` is not such an error (success results,
+    Live Context, plain text, unrelated JSON).
+    """
+    try:
+        data: Any = json.loads(content)
+    except ValueError:
+        return None
+    if isinstance(data, dict) and isinstance(data.get("result"), str):
+        try:
+            data = json.loads(data["result"])
+        except ValueError:
+            return None
+    if not isinstance(data, dict) or "error" not in data:
+        return None
+    return _render_error(data)
 
 
 def compact_live_context(content: str) -> str | None:
