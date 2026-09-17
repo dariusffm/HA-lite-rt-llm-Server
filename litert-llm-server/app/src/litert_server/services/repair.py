@@ -23,6 +23,7 @@ from litert_server.services.ha_prompt import Entity, entity_names, split_static_
 log = logging.getLogger(__name__)
 
 _TARGET_KEYS = ("area", "floor")
+_UNTARGETED_ALLOWED_PATTERN = re.compile(r"\balle\b", re.IGNORECASE)
 
 
 def find_entity(user_text: str, entities: list[Entity]) -> tuple[Entity | None, str]:
@@ -91,9 +92,29 @@ def _catalogue(messages: list[ChatTurn]) -> list[Entity] | None:
     return None
 
 
+def _is_untargeted_switching(call: ToolCall, switching_tools: set[str]) -> bool:
+    return call.name in switching_tools and not any(
+        call.arguments.get(k) for k in ("name", *_TARGET_KEYS)
+    )
+
+
+def _untargeted_allowed(user_text: str | None, previous_user_text: str | None) -> bool:
+    return any(
+        t is not None and bool(_UNTARGETED_ALLOWED_PATTERN.search(t))
+        for t in (user_text, previous_user_text)
+    )
+
+
 class ToolCallRepairService:
-    def __init__(self, inner: InferenceService) -> None:
+    def __init__(
+        self,
+        inner: InferenceService,
+        switching_tools: set[str] | None = None,
+        block_reply: str | None = None,
+    ) -> None:
         self._inner = inner
+        self._switching_tools = switching_tools or {"HassTurnOff", "HassToggle"}
+        self._block_reply = block_reply or "Welches Gerät oder welchen Bereich meinst du genau?"
 
     async def stream_completion(
         self, model: str, prompt: str, params: GenerationParams
@@ -120,29 +141,81 @@ class ToolCallRepairService:
                 log.debug("tool call repair skipped: no static context")
                 return tok
             user_text, previous_user_text = last_two_user_texts(messages)
-            repaired: list[ToolCall] = []
-            for call in tok.tool_calls or []:
-                fixed, reason = repair_call(call, tools, user_text or "", entities)
-                source = "from user text"
-                if reason == "no known entity in user text" and previous_user_text is not None:
-                    retried, retry_reason = repair_call(
-                        call, tools, previous_user_text, entities
-                    )
-                    if retry_reason == "ok":
-                        fixed, reason, source = retried, retry_reason, "from previous user text"
-                if reason == "ok":
-                    log.info(
-                        "tool call repaired: %s name=%r (%s)",
-                        fixed.name,
-                        fixed.arguments["name"],
-                        source,
-                    )
-                else:
-                    log.debug("tool call repair skipped: %s", reason)
-                repaired.append(fixed)
-            if all(f is c for f, c in zip(repaired, tok.tool_calls or [], strict=True)):
+
+            tool_calls = tok.tool_calls or []
+            repaired = self._repair_calls(
+                tool_calls, tools, user_text, previous_user_text, entities
+            )
+            filtered, repaired = self._filter_blocked(
+                repaired, tok, user_text, previous_user_text
+            )
+            if filtered is not tok:
+                return filtered
+
+            if all(f is c for f, c in zip(repaired, tool_calls, strict=True)):
                 return tok
             return tok.model_copy(update={"tool_calls": repaired})
         except Exception as exc:  # never break the reply over a repair
             log.warning("tool call repair failed: %r", exc)
             return tok
+
+    def _repair_calls(
+        self,
+        calls: list[ToolCall],
+        tools: list[ToolSpec],
+        user_text: str | None,
+        previous_user_text: str | None,
+        entities: list[Entity],
+    ) -> list[ToolCall]:
+        repaired: list[ToolCall] = []
+        for call in calls:
+            fixed, reason = repair_call(call, tools, user_text or "", entities)
+            source = "from user text"
+            if reason == "no known entity in user text" and previous_user_text is not None:
+                retried, retry_reason = repair_call(call, tools, previous_user_text, entities)
+                if retry_reason == "ok":
+                    fixed, reason, source = retried, retry_reason, "from previous user text"
+            if reason == "ok":
+                log.info(
+                    "tool call repaired: %s name=%r (%s)",
+                    fixed.name,
+                    fixed.arguments["name"],
+                    source,
+                )
+            else:
+                log.debug("tool call repair skipped: %s", reason)
+            repaired.append(fixed)
+        return repaired
+
+    def _filter_blocked(
+        self,
+        repaired: list[ToolCall],
+        tok: Token,
+        user_text: str | None,
+        previous_user_text: str | None,
+    ) -> tuple[Token, list[ToolCall]]:
+        blocked_ids = {
+            call.id
+            for call in repaired
+            if _is_untargeted_switching(call, self._switching_tools)
+            and not _untargeted_allowed(user_text, previous_user_text)
+        }
+        if not blocked_ids:
+            return tok, repaired
+
+        remaining = [call for call in repaired if call.id not in blocked_ids]
+        for call in repaired:
+            if call.id in blocked_ids:
+                log.warning("tool call blocked: %s without name/area/floor", call.name)
+        if not remaining:
+            return (
+                tok.model_copy(
+                    update={
+                        "text": self._block_reply,
+                        "tool_calls": None,
+                        "finish_reason": "stop",
+                    }
+                ),
+                remaining,
+            )
+        return tok.model_copy(update={"tool_calls": remaining}), remaining

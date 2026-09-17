@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     prompt_compaction: Literal["off", "on", "auto"] = "auto"
     conversation_ttl: int = Field(default=300, ge=0, le=3600)
     tool_call_repair: bool = True
+    switching_tool_names: list[str] = ["HassTurnOff", "HassToggle"]
+    switching_block_reply: str = "Welches Gerät oder welchen Bereich meinst du genau?"
     generation_timeout: int = Field(default=240, ge=0, le=600)
     hf_token: str | None = Field(default=None, validation_alias="HF_TOKEN")
 

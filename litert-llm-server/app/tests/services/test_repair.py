@@ -27,6 +27,20 @@ _TURN_ON = ToolSpec(
         },
     },
 )
+_TURN_OFF = ToolSpec(
+    name="HassTurnOff",
+    description="Turns off a device or entity",
+    parameters={
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "area": {"type": "string"},
+            "floor": {"type": "string"},
+            "domain": {"type": "array"},
+            "device_class": {"type": "array"},
+        },
+    },
+)
 _LIVE = ToolSpec(
     name="GetLiveContext",
     description="",
@@ -35,7 +49,7 @@ _LIVE = ToolSpec(
         "properties": {"domain": {"type": "string"}, "area": {"type": "string"}},
     },
 )
-_TOOLS = [_TURN_ON, _LIVE]
+_TOOLS = [_TURN_ON, _TURN_OFF, _LIVE]
 _SYSTEM = ChatTurn(
     role="system",
     content=(
@@ -50,8 +64,10 @@ _SYSTEM = ChatTurn(
 _PARAMS = GenerationParams(temperature=0.0, max_tokens=32)
 
 
-def _call(**arguments) -> ToolCall:
-    return ToolCall(id="c1", name="HassTurnOn", arguments=arguments)
+def _tool_call(
+    tool_name: str = "HassTurnOn", call_id: str = "c1", **arguments
+) -> ToolCall:
+    return ToolCall(id=call_id, name=tool_name, arguments=arguments)
 
 
 # --- find_entity ---------------------------------------------------------------
@@ -99,7 +115,7 @@ def test_find_entity_none_when_nothing_matches():
 
 
 def test_repair_adds_name_and_entity_domain_and_drops_device_class():
-    call = _call(domain=["light"], device_class=["switch"])
+    call = _tool_call(domain=["light"], device_class=["switch"])
     fixed, reason = repair_call(call, _TOOLS, "mach die Wohnzimmer-Fenster-Lampe an", _ENTITIES)
     assert reason == "ok"
     assert fixed.id == "c1" and fixed.name == "HassTurnOn"
@@ -107,7 +123,7 @@ def test_repair_adds_name_and_entity_domain_and_drops_device_class():
 
 
 def test_repair_keeps_unrelated_arguments():
-    call = _call(brightness=50)
+    call = _tool_call(brightness=50)
     fixed, _ = repair_call(call, _TOOLS, "Wohnzimmer-Fenster-Lampe auf 50", _ENTITIES)
     assert fixed.arguments == {
         "brightness": 50,
@@ -125,7 +141,7 @@ def test_repair_keeps_unrelated_arguments():
     ],
 )
 def test_repair_leaves_targeted_calls_alone(arguments, reason):
-    call = _call(**arguments)
+    call = _tool_call(tool_name="HassTurnOn", **arguments)
     fixed, why = repair_call(call, _TOOLS, "Wohnzimmer-Fenster-Lampe an", _ENTITIES)
     assert fixed is call
     assert why == reason
@@ -147,7 +163,7 @@ async def _drain(svc, messages, tools=_TOOLS):
 
 async def test_service_repairs_streamed_tool_call(caplog: pytest.LogCaptureFixture):
     caplog.set_level(logging.INFO, logger="litert_server.services.repair")
-    inner = ScriptedEngine(replies=[[_call(domain=["light"], device_class=["switch"])]])
+    inner = ScriptedEngine(replies=[[_tool_call(domain=["light"], device_class=["switch"])]])
     svc = ToolCallRepairService(inner)
 
     tokens = await _drain(
@@ -166,7 +182,7 @@ async def test_service_repairs_streamed_tool_call(caplog: pytest.LogCaptureFixtu
 
 
 async def test_service_uses_last_user_turn_and_passes_text_through():
-    inner = ScriptedEngine(replies=[[_call(domain=["light"])]])
+    inner = ScriptedEngine(replies=[[_tool_call(domain=["light"])]])
     svc = ToolCallRepairService(inner)
     messages = [
         _SYSTEM,
@@ -182,7 +198,7 @@ async def test_service_repairs_from_previous_user_message_when_last_names_no_ent
     caplog: pytest.LogCaptureFixture,
 ):
     caplog.set_level(logging.INFO, logger="litert_server.services.repair")
-    inner = ScriptedEngine(replies=[[_call(domain=["light"], device_class=["switch"])]])
+    inner = ScriptedEngine(replies=[[_tool_call(domain=["light"], device_class=["switch"])]])
     svc = ToolCallRepairService(inner)
     messages = [
         _SYSTEM,
@@ -200,7 +216,7 @@ async def test_service_repairs_from_previous_user_message_when_last_names_no_ent
 
 
 async def test_service_does_not_fall_back_when_last_message_is_ambiguous():
-    inner = ScriptedEngine(replies=[[_call(domain=["light"])]])
+    inner = ScriptedEngine(replies=[[_tool_call(domain=["light"])]])
     svc = ToolCallRepairService(inner)
     messages = [
         _SYSTEM,
@@ -215,7 +231,7 @@ async def test_service_does_not_fall_back_when_last_message_is_ambiguous():
 
 
 async def test_service_does_not_fall_back_without_a_previous_user_message():
-    inner = ScriptedEngine(replies=[[_call(domain=["light"])]])
+    inner = ScriptedEngine(replies=[[_tool_call(domain=["light"])]])
     svc = ToolCallRepairService(inner)
     messages = [_SYSTEM, ChatTurn(role="user", content="mach das Licht an")]
 
@@ -226,7 +242,7 @@ async def test_service_does_not_fall_back_without_a_previous_user_message():
 
 async def test_service_leaves_calls_alone_without_static_context(caplog: pytest.LogCaptureFixture):
     caplog.set_level(logging.DEBUG, logger="litert_server.services.repair")
-    call = _call(domain=["light"])
+    call = _tool_call(domain=["light"])
     inner = ScriptedEngine(replies=[[call]])
     svc = ToolCallRepairService(inner)
     tokens = await _drain(
@@ -253,3 +269,122 @@ async def test_service_completion_passthrough():
     svc = ToolCallRepairService(inner)
     tokens = [t async for t in svc.stream_completion("m", "p", _PARAMS)]
     assert tokens[0].text == "completion"
+
+
+# --- untargeted switching block --------------------------------------------------
+
+
+async def test_service_blocks_untargeted_switching_call_and_replies_with_text(
+    caplog: pytest.LogCaptureFixture,
+):
+    caplog.set_level(logging.WARNING, logger="litert_server.services.repair")
+    call = _tool_call("HassTurnOff", domain=["light"])
+    inner = ScriptedEngine(replies=[[call]])
+    svc = ToolCallRepairService(inner)
+    messages = [
+        _SYSTEM,
+        ChatTurn(role="user", content="Und jetzt bitte wieder aus."),
+    ]
+
+    tokens = await _drain(svc, messages)
+
+    assert len(tokens) == 1
+    assert tokens[0].tool_calls is None
+    assert tokens[0].finish_reason == "stop"
+    assert tokens[0].text == "Welches Gerät oder welchen Bereich meinst du genau?"
+    assert "tool call blocked: HassTurnOff without name/area/floor" in caplog.text
+
+
+async def test_service_allows_untargeted_switching_call_when_user_says_alle():
+    call = _tool_call("HassTurnOff", domain=["light"])
+    inner = ScriptedEngine(replies=[[call]])
+    svc = ToolCallRepairService(inner)
+    messages = [
+        _SYSTEM,
+        ChatTurn(role="user", content="Schalte alle Lichter aus"),
+    ]
+
+    tokens = await _drain(svc, messages)
+
+    assert tokens[-1].finish_reason == "tool_calls"
+    assert tokens[-1].tool_calls[0].arguments == {"domain": ["light"]}
+
+
+async def test_service_allows_untargeted_switching_call_when_previous_user_said_alle():
+    call = _tool_call("HassTurnOff", domain=["light"])
+    inner = ScriptedEngine(replies=[[call]])
+    svc = ToolCallRepairService(inner)
+    messages = [
+        _SYSTEM,
+        ChatTurn(role="user", content="Schalte alle Lichter aus."),
+        ChatTurn(role="assistant", content="Erledigt."),
+        ChatTurn(role="user", content="Und wieder an."),
+    ]
+
+    tokens = await _drain(svc, messages)
+
+    assert tokens[-1].finish_reason == "tool_calls"
+    assert tokens[-1].tool_calls[0].arguments == {"domain": ["light"]}
+
+
+async def test_service_allows_switching_call_with_area():
+    call = _tool_call("HassTurnOff", area="Wohnzimmer")
+    inner = ScriptedEngine(replies=[[call]])
+    svc = ToolCallRepairService(inner)
+    messages = [
+        _SYSTEM,
+        ChatTurn(role="user", content="Und jetzt bitte wieder aus."),
+    ]
+
+    tokens = await _drain(svc, messages)
+
+    assert tokens[-1].finish_reason == "tool_calls"
+    assert tokens[-1].tool_calls[0] is call
+
+
+async def test_service_does_not_block_a_call_repaired_from_previous_user_text():
+    call = _tool_call("HassTurnOff", domain=["light"], device_class=["switch"])
+    inner = ScriptedEngine(replies=[[call]])
+    svc = ToolCallRepairService(inner)
+    messages = [
+        _SYSTEM,
+        ChatTurn(role="user", content="Bitte schalte die Lampe Komode1 im Wohnzimmer ein."),
+        ChatTurn(role="assistant", content="Erledigt."),
+        ChatTurn(role="user", content="Und jetzt bitte wieder aus."),
+    ]
+
+    tokens = await _drain(svc, messages)
+
+    assert tokens[-1].finish_reason == "tool_calls"
+    assert tokens[-1].tool_calls[0].arguments == {"name": "Komode1", "domain": ["light"]}
+
+
+async def test_service_leaves_get_live_context_without_target_untouched():
+    call = ToolCall(id="c9", name="GetLiveContext", arguments={"domain": "light"})
+    inner = ScriptedEngine(replies=[[call]])
+    svc = ToolCallRepairService(inner)
+    messages = [
+        _SYSTEM,
+        ChatTurn(role="user", content="Wie ist der Status?"),
+    ]
+
+    tokens = await _drain(svc, messages)
+
+    assert tokens[-1].finish_reason == "tool_calls"
+    assert tokens[-1].tool_calls[0] is call
+
+
+async def test_service_drops_only_the_blocked_call_from_a_mixed_token():
+    blocked = _tool_call("HassTurnOff", call_id="c1", domain=["light"])
+    fine = _tool_call("HassTurnOn", call_id="c2", area="Wohnzimmer")
+    inner = ScriptedEngine(replies=[[blocked, fine]])
+    svc = ToolCallRepairService(inner)
+    messages = [
+        _SYSTEM,
+        ChatTurn(role="user", content="Und jetzt bitte wieder aus."),
+    ]
+
+    tokens = await _drain(svc, messages)
+
+    assert tokens[-1].finish_reason == "tool_calls"
+    assert [c.id for c in tokens[-1].tool_calls] == ["c2"]

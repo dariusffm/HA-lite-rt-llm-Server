@@ -123,7 +123,11 @@ def make_production_app() -> FastAPI:
     if compacting:
         engine = CompactingInferenceService(engine)
     if settings.tool_call_repair:
-        engine = ToolCallRepairService(engine)
+        engine = ToolCallRepairService(
+            engine,
+            switching_tools=set(settings.switching_tool_names),
+            block_reply=settings.switching_block_reply,
+        )
     log.info(
         "prompt compaction: %s (%s, context_length %d)",
         "enabled" if compacting else "disabled",
