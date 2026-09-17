@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.4.8 — 2026-09-17
+
+- Fix: the add-on crashed on start with `SettingsError: error parsing value
+  for field "switching_tool_names"`. `bashio::config` prints a list as
+  multi-line JSON, and the loop that persists the env vars for s6 reads only
+  the first line of a value, so `LITERT_SWITCHING_TOOL_NAMES` was stored as a
+  bare `[`. The init script now compacts the list with `jq -c` before
+  exporting it. 0.4.6/0.4.7 never started on a host with s6 persistence.
+
+## 0.4.7 — 2026-09-17
+
+- Re-release of 0.4.6 with no code change; the add-on version had to be
+  bumped for the Supervisor to offer the update. The FastAPI/OpenAPI
+  `version` string, which had been left at 0.4.5 in 0.4.6, now matches again.
+
+## 0.4.6 — 2026-09-17
+
+- Switching tool calls without a target are blocked: a call to a tool from
+  `switching_tool_names` (default `HassTurnOff`, `HassToggle`) that carries
+  no `name`, `area` or `floor` and cannot be repaired from the user text is
+  not executed. Unless the current or previous user message says "alle", the
+  model receives `switching_block_reply` (default "Welches Gerät oder welchen
+  Bereich meinst du genau?") instead. Mixed replies keep the allowed calls;
+  log: `tool call blocked: <tool> without name/area/floor`.
+- New options `switching_tool_names` and `switching_block_reply`.
+
 ## 0.4.5 — 2026-09-17
 
 - Prompt compaction: a valid stage-1 reply that selects no entities (empty

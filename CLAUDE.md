@@ -122,7 +122,13 @@ Repositories; older versions: Settings → Add-ons → Add-on Store).
 - **Python**: 3.12+. `uv` for dep management. `ruff` for lint/format. `mypy`
   strict for new code. `pytest` + `pytest-asyncio`.
 - **Versioning**: `version` in `config.yaml` is the user-visible add-on
-  version. Bump on every released change, follow semver.
+  version. Bump on every released change, follow semver. The same commit must
+  bump the FastAPI `version` in `app/src/<package>/__main__.py` and add a
+  `CHANGELOG.md` entry with the release date — `GET /openapi.json` reports the
+  FastAPI string, so a stale one makes a rollout check report the old version.
+  What actually runs on HA is shown on the add-on page
+  `/config/app/<slug>/info` ("Aktuelle Version"); trust that over
+  `/openapi.json` when the two disagree.
 - **Add-on slugs**: snake_case (`litert_llm_server`). Directory names:
   kebab-case (`litert-llm-server`). The `slug` field in `config.yaml` is
   what HA stores internally.
