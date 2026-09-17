@@ -30,16 +30,12 @@ async def test_chat_completion_streaming_sse(client: AsyncClient):
     assert len(chunks) >= 2
     assert chunks[0]["object"] == "chat.completion.chunk"
     assert chunks[0]["choices"][0]["delta"].get("role") == "assistant"
-    text = "".join(
-        c["choices"][0]["delta"].get("content", "") for c in chunks
-    )
+    text = "".join(c["choices"][0]["delta"].get("content", "") for c in chunks)
     assert text == "Hello, world!"
     assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
 
 
-async def test_chat_completion_streaming_engine_error(
-    client: AsyncClient, fake_engine: FakeEngine
-):
+async def test_chat_completion_streaming_engine_error(client: AsyncClient, fake_engine: FakeEngine):
     fake_engine.raise_error = RuntimeError("boom")
     payload = {
         "model": "gemma-4-e2b",

@@ -61,9 +61,7 @@ async def test_chat_streams_error_record_on_engine_failure(
     assert chunks == [{"error": "boom"}]
 
 
-async def test_chat_non_streaming_engine_error(
-    ollama_client: AsyncClient, fake_engine: FakeEngine
-):
+async def test_chat_non_streaming_engine_error(ollama_client: AsyncClient, fake_engine: FakeEngine):
     fake_engine.raise_error = RuntimeError("boom")
     r = await ollama_client.post(
         "/api/chat",

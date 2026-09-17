@@ -64,9 +64,7 @@ _SYSTEM = ChatTurn(
 _PARAMS = GenerationParams(temperature=0.0, max_tokens=32)
 
 
-def _tool_call(
-    tool_name: str = "HassTurnOn", call_id: str = "c1", **arguments
-) -> ToolCall:
+def _tool_call(tool_name: str = "HassTurnOn", call_id: str = "c1", **arguments) -> ToolCall:
     return ToolCall(id=call_id, name=tool_name, arguments=arguments)
 
 
@@ -210,9 +208,7 @@ async def test_service_repairs_from_previous_user_message_when_last_names_no_ent
     tokens = await _drain(svc, messages)
 
     assert tokens[-1].tool_calls[0].arguments == {"name": "Komode1", "domain": ["light"]}
-    assert (
-        "tool call repaired: HassTurnOn name='Komode1' (from previous user text)" in caplog.text
-    )
+    assert "tool call repaired: HassTurnOn name='Komode1' (from previous user text)" in caplog.text
 
 
 async def test_service_does_not_fall_back_when_last_message_is_ambiguous():

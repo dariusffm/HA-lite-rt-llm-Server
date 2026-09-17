@@ -40,8 +40,7 @@ class InferenceService(Protocol):
         model: str,
         prompt: str,
         params: GenerationParams,
-    ) -> AsyncIterator[Token]:
-        ...
+    ) -> AsyncIterator[Token]: ...
 
     def stream_chat(
         self,
@@ -49,8 +48,7 @@ class InferenceService(Protocol):
         messages: list[ChatTurn],
         params: GenerationParams,
         tools: list[ToolSpec] | None = None,
-    ) -> AsyncIterator[Token]:
-        ...
+    ) -> AsyncIterator[Token]: ...
 
 
 async def _drain(stream: AsyncIterator[Token]) -> tuple[str, ChatFinish, list[ToolCall] | None]:

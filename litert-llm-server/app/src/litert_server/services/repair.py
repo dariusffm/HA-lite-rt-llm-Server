@@ -153,9 +153,7 @@ class ToolCallRepairService:
             repaired = self._repair_calls(
                 tool_calls, tools, user_text, previous_user_text, entities
             )
-            filtered, repaired = self._filter_blocked(
-                repaired, tok, user_text, previous_user_text
-            )
+            filtered, repaired = self._filter_blocked(repaired, tok, user_text, previous_user_text)
             if filtered is not tok:
                 return filtered
 

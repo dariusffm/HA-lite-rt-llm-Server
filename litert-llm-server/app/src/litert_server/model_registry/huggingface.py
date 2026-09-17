@@ -136,9 +136,7 @@ class HuggingFaceRegistry:
         try:
             tmp_path = await asyncio.to_thread(_download)
         except Exception as exc:
-            yield PullProgress(
-                bytes_done=0, bytes_total=0, status="error", error=str(exc)
-            )
+            yield PullProgress(bytes_done=0, bytes_total=0, status="error", error=str(exc))
             return
 
         target = self.cache.path_for(name)

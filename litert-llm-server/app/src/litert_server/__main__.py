@@ -98,12 +98,12 @@ def build_app(
         models = await registry.list()
         return {"status": "ready" if models else "no-models", "ready": bool(models)}
 
-    app.include_router(build_openai_router(
-        engine=engine, registry=registry, tools_enabled=tools_enabled
-    ))
-    app.include_router(build_ollama_router(
-        engine=engine, registry=registry, tools_enabled=tools_enabled
-    ))
+    app.include_router(
+        build_openai_router(engine=engine, registry=registry, tools_enabled=tools_enabled)
+    )
+    app.include_router(
+        build_ollama_router(engine=engine, registry=registry, tools_enabled=tools_enabled)
+    )
     return app
 
 

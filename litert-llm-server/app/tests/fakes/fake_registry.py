@@ -36,9 +36,7 @@ class FakeRegistry:
                 status="downloading" if i < self.pull_chunks else "done",
             )
         if name not in self.models:
-            self.models[name] = ModelInfo(
-                name=name, size_bytes=total, quantization="int4"
-            )
+            self.models[name] = ModelInfo(name=name, size_bytes=total, quantization="int4")
 
     async def delete(self, name: str) -> None:
         self.models.pop(name, None)

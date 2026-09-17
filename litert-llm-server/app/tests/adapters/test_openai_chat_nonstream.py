@@ -3,9 +3,7 @@ from httpx import AsyncClient
 from tests.fakes.fake_engine import FakeEngine
 
 
-async def test_chat_completion_non_streaming(
-    client: AsyncClient, fake_engine: FakeEngine
-):
+async def test_chat_completion_non_streaming(client: AsyncClient, fake_engine: FakeEngine):
     payload = {
         "model": "gemma-4-e2b",
         "messages": [{"role": "user", "content": "Hi"}],

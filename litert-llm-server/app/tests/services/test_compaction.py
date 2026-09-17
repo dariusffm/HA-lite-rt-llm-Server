@@ -142,9 +142,7 @@ async def test_empty_selection_from_non_empty_query_logs_the_query_for_diagnosis
 async def test_fully_empty_stage_one_query_does_not_log_query_diagnostics(
     caplog: pytest.LogCaptureFixture,
 ):
-    inner = ScriptedEngine(
-        replies=[json.dumps({"domains": [], "areas": [], "names": []}), "ok"]
-    )
+    inner = ScriptedEngine(replies=[json.dumps({"domains": [], "areas": [], "names": []}), "ok"])
     svc = CompactingInferenceService(inner)
 
     with caplog.at_level(logging.INFO, logger="litert_server.services.compaction"):

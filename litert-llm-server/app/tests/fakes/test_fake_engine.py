@@ -24,8 +24,6 @@ async def test_fake_engine_yields_scripted_tool_call_and_records_tools():
 async def test_fake_engine_default_still_streams_text():
     engine = FakeEngine()
     params = GenerationParams(max_tokens=10, temperature=0.1)
-    toks = [
-        t async for t in engine.stream_chat("m", [ChatTurn(role="user", content="?")], params)
-    ]
+    toks = [t async for t in engine.stream_chat("m", [ChatTurn(role="user", content="?")], params)]
     assert "".join(t.text for t in toks) == "Hello, world!"
     assert engine.chat_calls[-1].tools is None

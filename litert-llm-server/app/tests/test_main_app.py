@@ -95,12 +95,17 @@ async def test_build_app_tools_disabled_ignores_tools():
     engine = FakeEngine(tool_calls=[ToolCall(id="c", name="get_weather", arguments={})])
     app = build_app(engine=engine, registry=FakeRegistry(), tools_enabled=False)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        r = await c.post("/api/chat", json={
-            "model": "gemma-4-e2b",
-            "messages": [{"role": "user", "content": "?"}],
-            "tools": [{"type": "function", "function": {"name": "get_weather", "parameters": {}}}],
-            "stream": False,
-        })
+        r = await c.post(
+            "/api/chat",
+            json={
+                "model": "gemma-4-e2b",
+                "messages": [{"role": "user", "content": "?"}],
+                "tools": [
+                    {"type": "function", "function": {"name": "get_weather", "parameters": {}}}
+                ],
+                "stream": False,
+            },
+        )
     assert engine.chat_calls[-1].tools is None
     assert "tool_calls" not in r.json()["message"]
 

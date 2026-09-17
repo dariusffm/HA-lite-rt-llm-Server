@@ -198,9 +198,7 @@ async def _bridge_producer(
                 yield Token(text="", index=index, finish_reason="stop")
                 return
             if isinstance(item, Exception):
-                log.debug(
-                    "producer failed after %.1fs: %r", time.monotonic() - state.started, item
-                )
+                log.debug("producer failed after %.1fs: %r", time.monotonic() - state.started, item)
                 raise item
             state.chunks += 1
             chunk_elapsed = time.monotonic() - state.started
@@ -305,9 +303,7 @@ def _extract_tool_calls(chunk: Mapping[str, Any]) -> list[ToolCall] | None:
         raw_calls.extend(c for c in top if isinstance(c, dict))
     content = chunk.get("content")
     if isinstance(content, list):
-        raw_calls.extend(
-            c for c in content if isinstance(c, dict) and c.get("type") == "tool_call"
-        )
+        raw_calls.extend(c for c in content if isinstance(c, dict) and c.get("type") == "tool_call")
     if not raw_calls:
         return None
     calls: list[ToolCall] = []

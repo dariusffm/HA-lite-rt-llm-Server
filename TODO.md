@@ -69,4 +69,4 @@ Spec `docs/superpowers/specs/2026-09-16-conversation-reuse-design.md`, Plan `doc
 - [ ] Nachrichten/Websuche im HA-Chat: HACS-Integration `skye-harris/llm_intents` (MIT) installieren, Backend Wikipedia oder SearXNG (kein Schlüssel) bzw. Brave (Schlüssel), Werkzeuge im Agenten freigeben; testen
 - [ ] Zweiten, schlanken Konversationsagenten nur mit Wetter/News-Werkzeugen anlegen (Assist-Prompt mit allen Entitäten kostet 3–4 min pro Durchlauf)
 - [ ] Später/optional MCP-Weg: SearXNG-Add-on (`pol4rfuchs/ha-apps`) + SearXNG-MCP-Server + Community-Add-on `mcp-proxy` (stdio→SSE; HAs MCP-Integration spricht nur SSE) → URL in HA-Integration "Model Context Protocol"
-- [ ] Vorbestehende Format-Abweichung: `ruff format` würde ~15 Dateien umformatieren (config.py, domain/*.py, huggingface.py u. a.); bewusst nicht angefasst
+- [x] Vorbestehende Format-Abweichung: `ruff format` auf 17 Dateien angewandt (2026-09-17), Baum ist formatiert
