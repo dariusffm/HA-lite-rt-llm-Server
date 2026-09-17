@@ -1,5 +1,5 @@
 name: "LiteRT LLM Server"
-version: "0.4.6"
+version: "0.4.7"
 slug: litert_llm_server
 description: "Local LLM inference via Google LiteRT with OpenAI- and Ollama-compatible APIs"
 arch:
