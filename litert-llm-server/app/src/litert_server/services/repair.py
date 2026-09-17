@@ -92,8 +92,13 @@ def _catalogue(messages: list[ChatTurn]) -> list[Entity] | None:
     return None
 
 
+def _tool_key(name: str) -> str:
+    """Strip HA's namespace prefix: ``intent__HassTurnOff`` -> ``HassTurnOff``."""
+    return name.rsplit("__", 1)[-1]
+
+
 def _is_untargeted_switching(call: ToolCall, switching_tools: set[str]) -> bool:
-    return call.name in switching_tools and not any(
+    return _tool_key(call.name) in switching_tools and not any(
         call.arguments.get(k) for k in ("name", *_TARGET_KEYS)
     )
 
@@ -113,7 +118,9 @@ class ToolCallRepairService:
         block_reply: str | None = None,
     ) -> None:
         self._inner = inner
-        self._switching_tools = switching_tools or {"HassTurnOff", "HassToggle"}
+        self._switching_tools = {
+            _tool_key(t) for t in (switching_tools or {"HassTurnOff", "HassToggle"})
+        }
         self._block_reply = block_reply or "Welches Gerät oder welchen Bereich meinst du genau?"
 
     async def stream_completion(

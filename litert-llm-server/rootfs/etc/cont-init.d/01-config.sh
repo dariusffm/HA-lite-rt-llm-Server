@@ -12,9 +12,12 @@ export LITERT_CONTEXT_LENGTH="$(bashio::config 'context_length')"
 export LITERT_PROMPT_COMPACTION="$(bashio::config 'prompt_compaction')"
 export LITERT_CONVERSATION_TTL="$(bashio::config 'conversation_ttl')"
 export LITERT_TOOL_CALL_REPAIR="$(bashio::config 'tool_call_repair')"
-# jq -c: bashio prints a list as multi-line JSON, and the persistence loop
-# below reads only the first line of a value, which would store a bare "[".
-export LITERT_SWITCHING_TOOL_NAMES="$(bashio::config 'switching_tool_names' | jq -c .)"
+# bashio prints a list as one raw element per line; pack it into single-line
+# JSON, because the persistence loop below keeps only a value's first line.
+LITERT_SWITCHING_TOOL_NAMES="$(bashio::config 'switching_tool_names' \
+    | jq -R -s -c 'split("\n") | map(select(length > 0))')"
+export LITERT_SWITCHING_TOOL_NAMES
+bashio::log.info "switching tools: ${LITERT_SWITCHING_TOOL_NAMES}"
 export LITERT_SWITCHING_BLOCK_REPLY="$(bashio::config 'switching_block_reply')"
 export LITERT_GENERATION_TIMEOUT="$(bashio::config 'generation_timeout')"
 export LITERT_MODELS_DIR="/data/models"

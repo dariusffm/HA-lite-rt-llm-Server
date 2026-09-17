@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.9 — 2026-09-17
+
+- Fix: untargeted switching calls were never blocked on a real HA host.
+  Home Assistant namespaces the tools it offers (`intent__HassTurnOff`,
+  `homeassistant__GetLiveContext`), so the exact-name match against
+  `switching_tool_names` never hit and `HassTurnOff{domain: [light]}` ran and
+  turned off every light. Tool names are now compared without the namespace
+  prefix, on both the call and the configured names.
+- Fix: `LITERT_SWITCHING_TOOL_NAMES` was exported through `jq -c`, but
+  `bashio::config` prints a list as one raw element per line, not as JSON —
+  `jq` aborted with a parse error and the variable stayed empty (the service
+  silently fell back to its built-in defaults). The init script now builds
+  the JSON array from the lines and logs the result as `switching tools: …`.
+
 ## 0.4.8 — 2026-09-17
 
 - Fix: the add-on crashed on start with `SettingsError: error parsing value

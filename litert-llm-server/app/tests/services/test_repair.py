@@ -388,3 +388,48 @@ async def test_service_drops_only_the_blocked_call_from_a_mixed_token():
 
     assert tokens[-1].finish_reason == "tool_calls"
     assert [c.id for c in tokens[-1].tool_calls] == ["c2"]
+
+
+# --- HA namespaces its tool names -----------------------------------------------
+
+
+async def test_service_blocks_untargeted_switching_call_with_namespaced_name(
+    caplog: pytest.LogCaptureFixture,
+):
+    """HA sends ``intent__HassTurnOff``, not ``HassTurnOff`` (observed 2026-09-17)."""
+    caplog.set_level(logging.WARNING, logger="litert_server.services.repair")
+    namespaced = ToolSpec(
+        name="intent__HassTurnOff",
+        description=_TURN_OFF.description,
+        parameters=_TURN_OFF.parameters,
+    )
+    call = _tool_call("intent__HassTurnOff", domain=["light"])
+    inner = ScriptedEngine(replies=[[call]])
+    svc = ToolCallRepairService(inner)
+    messages = [
+        _SYSTEM,
+        ChatTurn(role="user", content="Sei so nett und mach das Licht bitte aus, ja?"),
+    ]
+
+    tokens = await _drain(svc, messages, tools=[namespaced])
+
+    assert tokens[0].tool_calls is None
+    assert tokens[0].text == "Welches Gerät oder welchen Bereich meinst du genau?"
+    assert "tool call blocked: intent__HassTurnOff without name/area/floor" in caplog.text
+
+
+async def test_service_leaves_namespaced_read_tool_alone():
+    """``homeassistant__GetLiveContext`` without a filter must stay untouched."""
+    namespaced = ToolSpec(
+        name="homeassistant__GetLiveContext",
+        description=_LIVE.description,
+        parameters=_LIVE.parameters,
+    )
+    call = _tool_call("homeassistant__GetLiveContext", domain=["light"])
+    inner = ScriptedEngine(replies=[[call]])
+    svc = ToolCallRepairService(inner)
+    messages = [_SYSTEM, ChatTurn(role="user", content="Was ist im Wohnzimmer an?")]
+
+    tokens = await _drain(svc, messages, tools=[namespaced])
+
+    assert tokens[0].tool_calls == [call]
