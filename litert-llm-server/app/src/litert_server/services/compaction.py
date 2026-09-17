@@ -92,12 +92,13 @@ class CompactingInferenceService:
             started = time.monotonic()
             query, cached = await self._relevance(model, question, ctx.entities)
             stage_one_elapsed = time.monotonic() - started
-            picked = select_entities(ctx.entities, query)
-            if not picked:
-                raise _Skip("no entity matched")
         except _Skip as why:
             log.log(why.level, "prompt compaction skipped: %s", why)
             return messages
+        # A parseable stage-1 reply that selects nothing (empty query, an
+        # unknown domain, no matching entity) is a valid answer, not a
+        # failure — compact to zero entities instead of falling back.
+        picked = select_entities(ctx.entities, query)
         # render_static_context/compact_live_context are total (never raise),
         # so they run outside the _Skip-catching try above.
         system = ChatTurn(role="system", content=render_static_context(ctx, picked))
@@ -145,11 +146,6 @@ class CompactingInferenceService:
         query = parse_stage_one(text)
         if query is None:
             raise _Skip(f"stage-1 reply unparseable: {text[:80]!r}")
-        if query.is_empty():
-            raise _Skip("stage-1 query empty")
-        if query.domains and not (query.domains & {d.lower() for d in domains}):
-            if not (query.areas or query.names):
-                raise _Skip(f"stage-1 named unknown domains {sorted(query.domains)}")
         self._cache[cache_key] = query
         while len(self._cache) > self._cache_size:
             self._cache.popitem(last=False)

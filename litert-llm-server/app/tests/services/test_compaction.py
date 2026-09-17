@@ -71,13 +71,6 @@ async def test_passthrough_without_ha_marker():
     "stage_one_reply, reason, level",
     [
         ("not json", "stage-1 reply unparseable", "INFO"),
-        (json.dumps({"domains": [], "areas": [], "names": []}), "stage-1 query empty", "INFO"),
-        (json.dumps({"domains": ["cover"], "areas": [], "names": []}), "unknown domains", "INFO"),
-        (
-            json.dumps({"domains": [], "areas": ["Keller"], "names": []}),
-            "no entity matched",
-            "INFO",
-        ),
         (RuntimeError("engine down"), "stage-1 failed", "WARNING"),
     ],
 )
@@ -96,6 +89,46 @@ async def test_fallbacks_keep_prompt_unchanged_and_log_reason(
     assert record.levelname == level
     if level == "WARNING":
         assert "RuntimeError" in caplog.text  # exception class name, not just its message
+
+
+@pytest.mark.parametrize(
+    "stage_one_reply",
+    [
+        json.dumps({"domains": [], "areas": [], "names": []}),
+        json.dumps({"domains": ["cover"], "areas": [], "names": []}),
+        json.dumps({"domains": [], "areas": ["Keller"], "names": []}),
+    ],
+)
+async def test_empty_stage_one_selection_compacts_to_zero_entities_instead_of_skipping(
+    stage_one_reply, caplog: pytest.LogCaptureFixture
+):
+    """A parseable stage-1 reply that selects nothing (empty query, an
+    unknown domain, or an area with no matching entity) is a valid answer,
+    not a failure — the full uncompacted prompt must not be sent."""
+    inner = ScriptedEngine(replies=[stage_one_reply, "ok"])
+    svc = CompactingInferenceService(inner)
+
+    with caplog.at_level(logging.INFO, logger="litert_server.services.compaction"):
+        await _run(svc, [SYSTEM, QUESTION])
+
+    sent = inner.chat_calls[-1].messages
+    system = sent[0].content
+    assert system.startswith(HEAD + STATIC_MARKER + "\n" + FILTER_NOTE)
+    assert "Wohnzimmer Lampe" not in system and "Bad Temperatur" not in system
+    assert sent[1] == QUESTION
+    assert "entities 3→0" in caplog.text
+
+
+async def test_empty_stage_one_selection_is_cached_for_a_follow_up_tool_round():
+    inner = ScriptedEngine(
+        replies=[json.dumps({"domains": [], "areas": [], "names": []}), "a", "b"]
+    )
+    svc = CompactingInferenceService(inner)
+
+    await _run(svc, [SYSTEM, QUESTION])
+    await _run(svc, [SYSTEM, QUESTION])
+
+    assert len(inner.chat_calls) == 3  # stage1 once, stage2 twice
 
 
 async def test_stage_one_timeout_falls_back(caplog: pytest.LogCaptureFixture):

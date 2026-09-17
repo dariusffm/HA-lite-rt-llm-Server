@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.5 — 2026-09-17
+
+- Prompt compaction: a valid stage-1 reply that selects no entities (empty
+  lists, only unknown domains, or no matching entity) now compacts to zero
+  entities and is cached, instead of falling back to the full prompt. On the
+  HA host the full prompt (176 entities) did not produce a first chunk
+  within `generation_timeout`, so small talk and general questions ("Erzähl
+  mir einen Witz", "Was ist 17 mal 23?") ended in "Unknown error". Real
+  stage-1 failures (timeout, engine error, unparseable reply) still fall
+  back to the full prompt.
+
 ## 0.4.4 — 2026-09-16
 
 - Diagnostics: chunks from `send_message_async` that carry neither text nor

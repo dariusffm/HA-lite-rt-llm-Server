@@ -38,9 +38,6 @@ class RelevanceQuery:
     areas: frozenset[str]
     names: frozenset[str]
 
-    def is_empty(self) -> bool:
-        return not (self.domains or self.areas or self.names)
-
 
 def _unique_sorted(values: list[str]) -> list[str]:
     return sorted({v for v in values if v})

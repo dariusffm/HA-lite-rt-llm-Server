@@ -85,6 +85,18 @@ def test_render_static_context_round_trips_a_blank_line_before_the_tail():
     assert out == text
 
 
+def test_render_static_context_with_no_entities_omits_the_yaml_list():
+    """A stage-1 selection of zero entities must not render as a bare
+    ``[]`` line — that reads as broken output inside the prompt."""
+    ctx = split_static_context(PROMPT + "Answer in German.\n")
+    assert ctx is not None
+
+    out = render_static_context(ctx, [])
+
+    assert out == HEAD + STATIC_MARKER + "\n" + FILTER_NOTE + "\nAnswer in German.\n"
+    assert "[]" not in out
+
+
 def test_entity_names_includes_aliases_and_entity_areas_accepts_str_or_list():
     e = {"names": "Bad Temperatur", "aliases": ["Badthermometer"], "areas": "Bad"}
 

@@ -111,7 +111,13 @@ def split_static_context(text: str) -> StaticContext | None:
 
 
 def render_static_context(ctx: StaticContext, entities: list[Entity]) -> str:
-    body = yaml.safe_dump(entities, allow_unicode=True, sort_keys=False, default_flow_style=False)
+    # yaml.safe_dump([]) renders "[]\n", which reads as broken output in the
+    # prompt body — an empty selection gets no YAML list at all instead.
+    body = (
+        yaml.safe_dump(entities, allow_unicode=True, sort_keys=False, default_flow_style=False)
+        if entities
+        else ""
+    )
     return f"{ctx.head}{STATIC_MARKER}\n{FILTER_NOTE}\n{body}{ctx.tail}"
 
 

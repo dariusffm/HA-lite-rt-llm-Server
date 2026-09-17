@@ -80,7 +80,7 @@ def build_app(
     registry: ModelRegistry,
     tools_enabled: bool = True,
 ) -> FastAPI:
-    app = FastAPI(title="litert-llm-server", version="0.4.4")
+    app = FastAPI(title="litert-llm-server", version="0.4.5")
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

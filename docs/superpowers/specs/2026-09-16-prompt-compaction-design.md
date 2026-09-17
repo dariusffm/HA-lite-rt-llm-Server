@@ -129,12 +129,17 @@ als leer werten), bevor er aufgibt.
 - ein Eintrag aus `names` case-insensitive als Teilstring in `names` oder
   `aliases` der Entität vorkommt.
 
-**Fallbacks** — jeweils voller Prompt und eine Info-Log-Zeile mit Grund:
+**Fallbacks** — voller Prompt und eine Info-Log-Zeile mit Grund, nur bei
+echtem Stufe-1-Fehler:
 - Stufe 1 wirft eine Exception, liefert kein gültiges JSON oder überschreitet
   45 s (`asyncio.timeout`; Mini-Prompt-Prefill auf dem HA-Host geschätzt 10–20 s).
-- Alle drei Listen leer.
-- Filter trifft 0 Entitäten.
-- Keine der gelieferten Domänen existiert im Prompt.
+
+Liefert Stufe 1 dagegen gültiges JSON, das zu keiner Entität führt (alle drei
+Listen leer, Filter trifft 0 Entitäten, oder keine der gelieferten Domänen
+existiert im Prompt), ist das eine gültige Antwort, kein Fehler: es wird
+**nicht** auf den vollen Prompt zurückgefallen, sondern mit einer leeren
+Entitätenliste kompaktiert (`entities 176→0`) und wie jede andere
+Stufe-1-Antwort gecacht.
 
 **Cache:** `dict[str, StageOneResult]` Fragetext → Ergebnis, max. 64 Einträge,
 FIFO. Kein Ablauf.
@@ -199,8 +204,10 @@ Zeichen statt Tokens zählen.
 - Filterung: 20 Entitäten, `{"domains":["light"]}` → nur Lampen; Kopf/Rest
   zeichengleich; Hinweiszeile vorhanden.
 - ODER-Abgleich: Bereich + Domäne liefern beide Mengen; Name trifft Alias.
-- Fallbacks: ungültiges JSON, leere Listen, 0 Treffer, erfundene Domäne,
-  Exception, Timeout → voller Prompt + Log-Zeile.
+- Fallbacks: ungültiges JSON, Exception, Timeout → voller Prompt + Log-Zeile.
+- Leere Selektion (leere Listen, 0 Treffer, erfundene Domäne) → Kompaktierung
+  auf 0 Entitäten statt Fallback; Ergebnis wird gecacht wie jede andere
+  Stufe-1-Antwort.
 - Tool-Kompaktierung: Live-Context → Zeilenform mit allen Feldern; fremdes
   Tool-Ergebnis unverändert; kaputtes YAML unverändert.
 - Cache: gleiche Frage → Stufe 1 nur einmal.

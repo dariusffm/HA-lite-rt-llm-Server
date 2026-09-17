@@ -57,7 +57,6 @@ def test_parse_stage_one_lowercases_and_drops_blanks():
     assert q == RelevanceQuery(
         domains=frozenset({"light"}), areas=frozenset({"bad"}), names=frozenset()
     )
-    assert not q.is_empty()
 
 
 def test_parse_stage_one_returns_none_for_invalid_input():
@@ -89,7 +88,7 @@ def test_parse_stage_one_preserves_spaces_in_multi_word_areas_and_names():
 
 def test_parse_stage_one_empty_lists_is_empty_query():
     q = parse_stage_one('{"domains": [], "areas": [], "names": []}')
-    assert q is not None and q.is_empty()
+    assert q == RelevanceQuery(domains=frozenset(), areas=frozenset(), names=frozenset())
 
 
 def test_select_entities_matches_domain_or_area_or_name_substring():
