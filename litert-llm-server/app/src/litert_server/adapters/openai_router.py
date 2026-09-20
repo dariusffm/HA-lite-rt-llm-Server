@@ -17,6 +17,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from litert_server.adapters.defaults import GenerationDefaults
 from litert_server.domain.inference import (
     ChatFinish,
     CompletionFinish,
@@ -77,10 +78,10 @@ class OpenAIToolSpec(BaseModel):
 
 
 class ChatCompletionRequest(BaseModel):
-    model: str
+    model: str | None = None
     messages: list[ChatMessage]
-    max_tokens: int = Field(default=512, ge=1, le=32768)
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    max_tokens: int | None = Field(default=None, ge=1, le=32768)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     stop: list[str] | None = None
     stream: bool = False
@@ -103,10 +104,10 @@ class ChatCompletionResponse(BaseModel):
 
 
 class CompletionRequest(BaseModel):
-    model: str
+    model: str | None = None
     prompt: str
-    max_tokens: int = Field(default=512, ge=1, le=32768)
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    max_tokens: int | None = Field(default=None, ge=1, le=32768)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     stop: list[str] | None = None
     stream: bool = False
@@ -200,10 +201,13 @@ def _error_response(exc: Exception) -> JSONResponse:
     )
 
 
-def _gen_params(req: ChatCompletionRequest | CompletionRequest) -> GenerationParams:
+def _gen_params(
+    req: ChatCompletionRequest | CompletionRequest, defaults: GenerationDefaults
+) -> GenerationParams:
+    """Client values win; ``None`` means the client said nothing."""
     return GenerationParams(
-        max_tokens=req.max_tokens,
-        temperature=req.temperature,
+        max_tokens=req.max_tokens if req.max_tokens is not None else defaults.max_tokens,
+        temperature=req.temperature if req.temperature is not None else defaults.temperature,
         top_p=req.top_p,
         stop=req.stop,
     )
@@ -214,7 +218,9 @@ def build_openai_router(
     engine: InferenceService,
     registry: ModelRegistry,
     tools_enabled: bool = True,
+    defaults: GenerationDefaults | None = None,
 ) -> APIRouter:
+    resolved = defaults or GenerationDefaults()
     router = APIRouter(prefix="/v1")
 
     @router.get("/models", response_model=OpenAIModelList)
@@ -229,7 +235,8 @@ def build_openai_router(
     async def chat_completions(
         req: ChatCompletionRequest,
     ) -> StreamingResponse | ChatCompletionResponse | JSONResponse:
-        params = _gen_params(req)
+        model = req.model or resolved.model
+        params = _gen_params(req, resolved)
         turns = _to_chat_turns(req.messages)
         tools = _to_tool_specs(req) if tools_enabled else None
 
@@ -242,7 +249,7 @@ def build_openai_router(
                     "id": completion_id,
                     "object": "chat.completion.chunk",
                     "created": created,
-                    "model": req.model,
+                    "model": model,
                     "choices": [
                         {"index": 0, "delta": delta, "finish_reason": finish},
                     ],
@@ -253,7 +260,7 @@ def build_openai_router(
 
             finish_reason: str | None = None
             try:
-                async for tok in engine.stream_chat(req.model, turns, params, tools):
+                async for tok in engine.stream_chat(model, turns, params, tools):
                     if tok.tool_calls:
                         yield frame(
                             {"tool_calls": _tool_calls_wire(tok.tool_calls, with_index=True)}
@@ -274,7 +281,7 @@ def build_openai_router(
             return StreamingResponse(sse_stream(), media_type="text/event-stream")
 
         try:
-            text, finish, calls = await collect_chat(engine, req.model, turns, params, tools)
+            text, finish, calls = await collect_chat(engine, model, turns, params, tools)
         except Exception as exc:
             return _error_response(exc)
         message = ChatMessage(
@@ -293,21 +300,22 @@ def build_openai_router(
         return ChatCompletionResponse(
             id=f"chatcmpl-{uuid.uuid4().hex}",
             created=int(time.time()),
-            model=req.model,
+            model=model,
             choices=[ChatCompletionChoice(index=0, message=message, finish_reason=finish)],
         )
 
     @router.post("/completions", response_model=None)
     async def completions(req: CompletionRequest) -> CompletionResponse | JSONResponse:
-        params = _gen_params(req)
+        model = req.model or resolved.model
+        params = _gen_params(req, resolved)
         try:
-            text, finish = await collect_completion(engine, req.model, req.prompt, params)
+            text, finish = await collect_completion(engine, model, req.prompt, params)
         except Exception as exc:
             return _error_response(exc)
         return CompletionResponse(
             id=f"cmpl-{uuid.uuid4().hex}",
             created=int(time.time()),
-            model=req.model,
+            model=model,
             choices=[CompletionChoice(text=text, index=0, finish_reason=finish)],
         )
 

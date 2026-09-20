@@ -13,11 +13,16 @@ fakes.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
+from collections.abc import AsyncIterator, Callable, Coroutine
+from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 
+from litert_server.adapters.defaults import GenerationDefaults
 from litert_server.adapters.ollama_router import build_ollama_router
 from litert_server.adapters.openai_router import build_openai_router
 from litert_server.config import Settings
@@ -74,13 +79,52 @@ def configure_logging(level_name: str) -> None:
     app_logger.propagate = False
 
 
+async def preload_models(registry: ModelRegistry, names: list[str]) -> None:
+    """Pull the configured models once at startup.
+
+    ``ModelRegistry.pull`` reports failure by yielding a final
+    ``PullProgress(status="error", …)`` instead of raising, so draining the
+    iterator and moving on would swallow every error silently. A failed
+    preload is logged and does not stop the service: the model can still be
+    pulled later via the API.
+    """
+    for name in names:
+        last = None
+        try:
+            async for progress in registry.pull(name):
+                last = progress
+        except Exception as exc:  # registry bugs must not kill startup
+            log.error("preload of %s failed: %r", name, exc)
+            continue
+        if last is None or last.status == "error":
+            reason = getattr(last, "error", None) or "no progress reported"
+            log.error("preload of %s failed: %s", name, reason)
+        else:
+            log.info("preloaded %s", name)
+
+
 def build_app(
     *,
     engine: InferenceService,
     registry: ModelRegistry,
     tools_enabled: bool = True,
+    defaults: GenerationDefaults | None = None,
+    on_startup: Callable[[], Coroutine[Any, Any, None]] | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="litert-llm-server", version="0.5.1")
+    background: set[asyncio.Task[None]] = set()
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        # Started, not awaited: the factory runs before the socket is bound, so
+        # a multi-GB download here would keep /healthz unreachable and HA would
+        # report a failed start.
+        if on_startup is not None:
+            task = asyncio.create_task(on_startup())
+            background.add(task)  # keep a reference so it is not garbage collected
+            task.add_done_callback(background.discard)
+        yield
+
+    app = FastAPI(title="litert-llm-server", version="0.5.1", lifespan=lifespan)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
@@ -99,10 +143,14 @@ def build_app(
         return {"status": "ready" if models else "no-models", "ready": bool(models)}
 
     app.include_router(
-        build_openai_router(engine=engine, registry=registry, tools_enabled=tools_enabled)
+        build_openai_router(
+            engine=engine, registry=registry, tools_enabled=tools_enabled, defaults=defaults
+        )
     )
     app.include_router(
-        build_ollama_router(engine=engine, registry=registry, tools_enabled=tools_enabled)
+        build_ollama_router(
+            engine=engine, registry=registry, tools_enabled=tools_enabled, defaults=defaults
+        )
     )
     return app
 
@@ -151,4 +199,18 @@ def make_production_app() -> FastAPI:
             settings.context_length,
         )
     log.info("tool calling: %s", "enabled" if settings.tool_calling else "disabled")
-    return build_app(engine=engine, registry=registry, tools_enabled=settings.tool_calling)
+    return build_app(
+        engine=engine,
+        registry=registry,
+        tools_enabled=settings.tool_calling,
+        on_startup=(
+            (lambda: preload_models(registry, settings.preload_models))
+            if settings.preload_models
+            else None
+        ),
+        defaults=GenerationDefaults(
+            model=settings.default_model,
+            max_tokens=settings.max_tokens,
+            temperature=settings.temperature,
+        ),
+    )

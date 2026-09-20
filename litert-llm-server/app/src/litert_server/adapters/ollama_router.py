@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from litert_server.adapters.defaults import GenerationDefaults
 from litert_server.domain.inference import (
     InferenceService,
     collect_chat,
@@ -80,7 +81,7 @@ class OllamaToolSpec(BaseModel):
 
 
 class OllamaChatRequest(BaseModel):
-    model: str
+    model: str | None = None
     messages: list[OllamaChatMessage]
     stream: bool = True
     options: dict[str, Any] | None = None
@@ -88,7 +89,7 @@ class OllamaChatRequest(BaseModel):
 
 
 class OllamaGenerateRequest(BaseModel):
-    model: str
+    model: str | None = None
     prompt: str
     stream: bool = True
     options: dict[str, Any] | None = None
@@ -107,11 +108,15 @@ class OllamaDeleteRequest(BaseModel):
     name: str
 
 
-def _params_from_ollama_options(options: dict[str, Any] | None) -> GenerationParams:
+def _params_from_ollama_options(
+    options: dict[str, Any] | None, defaults: GenerationDefaults
+) -> GenerationParams:
+    """Ollama sends generation settings in ``options``; anything absent
+    falls back to the add-on defaults."""
     options = options or {}
     return GenerationParams(
-        max_tokens=int(options.get("num_predict", 512)),
-        temperature=float(options.get("temperature", 0.7)),
+        max_tokens=int(options.get("num_predict", defaults.max_tokens)),
+        temperature=float(options.get("temperature", defaults.temperature)),
         top_p=options.get("top_p"),
         stop=options.get("stop"),
     )
@@ -191,7 +196,9 @@ def build_ollama_router(
     engine: InferenceService,
     registry: ModelRegistry,
     tools_enabled: bool = True,
+    defaults: GenerationDefaults | None = None,
 ) -> APIRouter:
+    resolved = defaults or GenerationDefaults()
     router = APIRouter(prefix="/api")
 
     @router.get("/tags", response_model=OllamaTagsResponse)
@@ -215,7 +222,8 @@ def build_ollama_router(
     async def chat(
         req: OllamaChatRequest,
     ) -> StreamingResponse | dict[str, Any] | JSONResponse:
-        params = _params_from_ollama_options(req.options)
+        model = req.model or resolved.model
+        params = _params_from_ollama_options(req.options, resolved)
         turns = _to_chat_turns(req.messages)
         tools = _to_tool_specs(req.tools) if tools_enabled else None
         created_at = datetime.now(UTC).isoformat()
@@ -224,7 +232,7 @@ def build_ollama_router(
             message: dict[str, Any], *, done: bool = False, done_reason: str | None = None
         ) -> str:
             rec: dict[str, Any] = {
-                "model": req.model,
+                "model": model,
                 "created_at": created_at,
                 "message": message,
                 "done": done,
@@ -236,7 +244,7 @@ def build_ollama_router(
         async def emit() -> AsyncIterator[str]:
             finish: str | None = None
             try:
-                async for tok in engine.stream_chat(req.model, turns, params, tools):
+                async for tok in engine.stream_chat(model, turns, params, tools):
                     if tok.tool_calls:
                         yield record(
                             {
@@ -264,14 +272,14 @@ def build_ollama_router(
             return StreamingResponse(emit(), media_type="application/x-ndjson")
 
         try:
-            text, finish, calls = await collect_chat(engine, req.model, turns, params, tools)
+            text, finish, calls = await collect_chat(engine, model, turns, params, tools)
         except Exception as exc:
             return _error_response(exc)
         message: dict[str, Any] = {"role": "assistant", "content": text}
         if calls:
             message["tool_calls"] = _tool_calls_wire(calls)
         return {
-            "model": req.model,
+            "model": model,
             "created_at": created_at,
             "message": message,
             "done": True,
@@ -282,17 +290,18 @@ def build_ollama_router(
     async def generate(
         req: OllamaGenerateRequest,
     ) -> StreamingResponse | dict[str, Any] | JSONResponse:
-        params = _params_from_ollama_options(req.options)
+        model = req.model or resolved.model
+        params = _params_from_ollama_options(req.options, resolved)
         created_at = datetime.now(UTC).isoformat()
 
         async def emit() -> AsyncIterator[str]:
             finish: str | None = None
             try:
-                async for tok in engine.stream_completion(req.model, req.prompt, params):
+                async for tok in engine.stream_completion(model, req.prompt, params):
                     if tok.text:
                         yield _nd(
                             {
-                                "model": req.model,
+                                "model": model,
                                 "created_at": created_at,
                                 "response": tok.text,
                                 "done": False,
@@ -305,7 +314,7 @@ def build_ollama_router(
                 return
             yield _nd(
                 {
-                    "model": req.model,
+                    "model": model,
                     "created_at": created_at,
                     "response": "",
                     "done": True,
@@ -317,11 +326,11 @@ def build_ollama_router(
             return StreamingResponse(emit(), media_type="application/x-ndjson")
 
         try:
-            text, finish = await collect_completion(engine, req.model, req.prompt, params)
+            text, finish = await collect_completion(engine, model, req.prompt, params)
         except Exception as exc:
             return _error_response(exc)
         return {
-            "model": req.model,
+            "model": model,
             "created_at": created_at,
             "response": text,
             "done": True,

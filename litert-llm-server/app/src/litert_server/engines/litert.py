@@ -137,7 +137,7 @@ def _fire_cancel(cancel: Cancel) -> None:
 
 
 async def _bridge_producer(
-    producer: Producer, cancel: Cancel, *, generation_timeout: float = 0.0
+    producer: Producer, cancel: Cancel, *, generation_timeout: float = 0.0, max_tokens: int = 0
 ) -> AsyncIterator[Token]:
     """Run a synchronous ``producer`` in a daemon thread and yield tokens it
     puts on a bounded queue. On ``GeneratorExit`` (client disconnect) or
@@ -149,6 +149,14 @@ async def _bridge_producer(
     whole generation: once it elapses without the producer finishing, the
     same abort path runs and the stream ends with a ``RuntimeError`` instead
     of propagating ``GeneratorExit``/``CancelledError``.
+
+    ``max_tokens`` (``0`` disables) bounds the reply here rather than at the
+    conversation: ``create_conversation`` fixes the limit for the whole
+    conversation, which a reused one would then inherit from whichever
+    request opened it, while the domain contract says ``max_tokens`` is per
+    call. Enforcing it on the consumer side keeps that promise and leaves
+    conversation reuse intact. It counts chunks, which is one decoded token
+    per chunk for litert-lm 0.17 but is an approximation, not a tokenizer.
     """
     q = _TokenQueue(maxsize=_TOKEN_QUEUE_MAX)
     state = _GenState()
@@ -214,6 +222,14 @@ async def _bridge_producer(
             state.text_parts.append(str(item))
             yield Token(text=str(item), index=index, finish_reason=None)
             index += 1
+            if max_tokens and index >= max_tokens:
+                # The producer is still decoding: stop it, or the native
+                # thread runs on with nobody reading the queue.
+                q.consumer_gone.set()
+                _fire_cancel(cancel)
+                log.debug("generation stopped at max_tokens=%d", max_tokens)
+                yield Token(text="", index=index, finish_reason="length")
+                return
     except (GeneratorExit, asyncio.CancelledError):
         q.consumer_gone.set()
         _fire_cancel(cancel)
@@ -505,7 +521,10 @@ class LiteRTEngine:
                     log.debug("session.close failed: %r", exc)
 
         async for tok in _bridge_producer(
-            producer, session.cancel_process, generation_timeout=self.generation_timeout
+            producer,
+            session.cancel_process,
+            generation_timeout=self.generation_timeout,
+            max_tokens=params.max_tokens,
         ):
             yield tok
 
@@ -703,10 +722,19 @@ class LiteRTEngine:
                 conversation.cancel_process()
 
         finished = False
+        # A max_tokens stop ends the loop normally but leaves the producer
+        # cancelled mid-decode, so the conversation must not be held for
+        # reuse: its native state does not match the reply we recorded.
+        stopped_at_limit = False
         try:
             async for tok in _bridge_producer(
-                producer, cancel, generation_timeout=self.generation_timeout
+                producer,
+                cancel,
+                generation_timeout=self.generation_timeout,
+                max_tokens=params.max_tokens,
             ):
+                if tok.finish_reason == "length":
+                    stopped_at_limit = True
                 yield tok
             finished = True
         finally:
@@ -720,7 +748,9 @@ class LiteRTEngine:
             detached_while_busy = (
                 new_turn is not None and held is not None and self._held is not held
             )
-            should_hold = finished and can_hold and self.current_model == model
+            should_hold = (
+                finished and not stopped_at_limit and can_hold and self.current_model == model
+            )
             continuation_of_held = held is not None and conversation is held.conversation
 
             if conversation is None:
