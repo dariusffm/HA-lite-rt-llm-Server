@@ -140,7 +140,7 @@ def build_app(
             task.add_done_callback(background.discard)
         yield
 
-    app = FastAPI(title="litert-llm-server", version="0.7.1", lifespan=lifespan)
+    app = FastAPI(title="litert-llm-server", version="0.7.2", lifespan=lifespan)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

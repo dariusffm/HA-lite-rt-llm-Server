@@ -12,10 +12,11 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from litert_server.adapters import disconnect
 from litert_server.adapters.defaults import GenerationDefaults
 from litert_server.domain.errors import EngineBusyError, EngineUnavailableError
 from litert_server.domain.inference import (
@@ -188,6 +189,8 @@ def _error_record(exc: Exception) -> str:
 
 
 def _error_response(exc: Exception) -> JSONResponse:
+    if isinstance(exc, disconnect.ClientGone):
+        return JSONResponse(status_code=499, content={"error": "client gone"})
     if isinstance(exc, EngineBusyError | EngineUnavailableError):
         log.warning("engine unavailable: %s", exc)
         return JSONResponse(
@@ -229,6 +232,7 @@ def build_ollama_router(
     @router.post("/chat", response_model=None)
     async def chat(
         req: OllamaChatRequest,
+        request: Request,
     ) -> StreamingResponse | dict[str, Any] | JSONResponse:
         model = req.model or resolved.model
         params = _params_from_ollama_options(req.options, resolved)
@@ -283,10 +287,14 @@ def build_ollama_router(
                 _, tokens = await prime(engine.stream_chat(model, turns, params, tools))
             except Exception as exc:
                 return _error_response(exc)
-            return StreamingResponse(emit(tokens), media_type="application/x-ndjson")
+            return StreamingResponse(
+                emit(disconnect.stream(tokens, request)), media_type="application/x-ndjson"
+            )
 
         try:
-            text, finish, calls = await collect_chat(engine, model, turns, params, tools)
+            text, finish, calls = await disconnect.guard(
+                collect_chat(engine, model, turns, params, tools), request
+            )
         except Exception as exc:
             return _error_response(exc)
         message: dict[str, Any] = {"role": "assistant", "content": text}
@@ -303,6 +311,7 @@ def build_ollama_router(
     @router.post("/generate", response_model=None)
     async def generate(
         req: OllamaGenerateRequest,
+        request: Request,
     ) -> StreamingResponse | dict[str, Any] | JSONResponse:
         model = req.model or resolved.model
         params = _params_from_ollama_options(req.options, resolved)
@@ -341,10 +350,14 @@ def build_ollama_router(
                 _, tokens = await prime(engine.stream_completion(model, req.prompt, params))
             except Exception as exc:
                 return _error_response(exc)
-            return StreamingResponse(emit(tokens), media_type="application/x-ndjson")
+            return StreamingResponse(
+                emit(disconnect.stream(tokens, request)), media_type="application/x-ndjson"
+            )
 
         try:
-            text, finish = await collect_completion(engine, model, req.prompt, params)
+            text, finish = await disconnect.guard(
+                collect_completion(engine, model, req.prompt, params), request
+            )
         except Exception as exc:
             return _error_response(exc)
         return {

@@ -13,10 +13,11 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from litert_server.adapters import disconnect
 from litert_server.adapters.defaults import GenerationDefaults
 from litert_server.domain.errors import EngineBusyError, EngineUnavailableError
 from litert_server.domain.inference import (
@@ -192,6 +193,9 @@ def _error_frame(exc: Exception) -> str:
 
 
 def _error_response(exc: Exception) -> JSONResponse:
+    if isinstance(exc, disconnect.ClientGone):
+        # Nobody is listening any more; the status only shows up in the log.
+        return JSONResponse(status_code=499, content={"error": {"message": "client gone"}})
     if isinstance(exc, EngineBusyError | EngineUnavailableError):
         # The request is fine, the moment is not: one generation at a time.
         log.warning("engine unavailable: %s", exc)
@@ -245,6 +249,7 @@ def build_openai_router(
     @router.post("/chat/completions", response_model=None)
     async def chat_completions(
         req: ChatCompletionRequest,
+        request: Request,
     ) -> StreamingResponse | ChatCompletionResponse | JSONResponse:
         model = req.model or resolved.model
         params = _gen_params(req, resolved)
@@ -296,10 +301,15 @@ def build_openai_router(
                 _, tokens = await prime(engine.stream_chat(model, turns, params, tools))
             except Exception as exc:
                 return _error_response(exc)
-            return StreamingResponse(sse_stream(tokens), media_type="text/event-stream")
+            return StreamingResponse(
+                sse_stream(disconnect.stream(tokens, request)),
+                media_type="text/event-stream",
+            )
 
         try:
-            text, finish, calls = await collect_chat(engine, model, turns, params, tools)
+            text, finish, calls = await disconnect.guard(
+                collect_chat(engine, model, turns, params, tools), request
+            )
         except Exception as exc:
             return _error_response(exc)
         message = ChatMessage(
@@ -325,6 +335,7 @@ def build_openai_router(
     @router.post("/completions", response_model=None)
     async def completions(
         req: CompletionRequest,
+        request: Request,
     ) -> StreamingResponse | CompletionResponse | JSONResponse:
         model = req.model or resolved.model
         params = _gen_params(req, resolved)
@@ -367,10 +378,15 @@ def build_openai_router(
                 _, tokens = await prime(engine.stream_completion(model, req.prompt, params))
             except Exception as exc:
                 return _error_response(exc)
-            return StreamingResponse(sse_stream(tokens), media_type="text/event-stream")
+            return StreamingResponse(
+                sse_stream(disconnect.stream(tokens, request)),
+                media_type="text/event-stream",
+            )
 
         try:
-            text, finish = await collect_completion(engine, model, req.prompt, params)
+            text, finish = await disconnect.guard(
+                collect_completion(engine, model, req.prompt, params), request
+            )
         except Exception as exc:
             return _error_response(exc)
         return CompletionResponse(

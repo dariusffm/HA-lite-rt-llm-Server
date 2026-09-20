@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.2 — 2026-09-20
+
+- A generation is now stopped when the client that asked for it is gone.
+  Nothing on this side noticed before: on the non-streaming path the
+  handler simply kept awaiting the engine, and on the streaming path the
+  response generator was left suspended rather than finalized. Measured on
+  the add-on host: a request abandoned after 8 seconds kept the next one
+  waiting 237 seconds, because the orphaned generation ran to its full
+  `max_tokens` while holding the engine slot.
+- Both adapters now ask `Request.is_disconnected()` while they wait, on all
+  four endpoints, streaming and not. The check runs on one watcher per
+  request rather than one per token — a per-token watcher is cancelled the
+  moment the token arrives, so with a model faster than the poll interval it
+  would almost never run.
+
 ## 0.7.1 — 2026-09-20
 
 Fixes two faults in 0.7.0's engine gate, both found by running it on real
