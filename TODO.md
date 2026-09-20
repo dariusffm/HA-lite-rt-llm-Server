@@ -116,3 +116,24 @@ Security-Befunde aus dem Review, bewusst **nicht** in diesen Branches (je ein ei
 - [ ] **Modelltausch ist nicht atomar.** `pull()` löscht das Ziel vor `_link_or_copy`; ein Abbruch mitten im Kopieren zerstört ein vorher funktionierendes Modell. Nach `.part` schreiben und mit `os.replace` umbenennen
 - [ ] **Kein Plattenplatz-Check.** Preload mehrerer Modelle kann `/data` der HA-Instanz füllen; vor dem Download freien Platz gegen die erwartete Größe prüfen
 - [ ] **Auf dem Host prüfen:** druckt `bashio::config 'hf_token'` bei `log_level: trace` den Wert? Nur mit einem eigens erzeugten und danach widerrufenen Wegwerf-Token testen
+
+## Nach dem Host-Test von 0.7.0/0.7.1 (2026-09-20)
+
+Gemessen auf dem HAOS-Host, nicht abgeleitet:
+- 0.7.0 nach einem Client-Abbruch: Slot dauerhaft belegt, `/readyz` weiter `ready`, CPU 0,1 %, jede
+  weitere Anfrage wartete endlos — nur ein Neustart half. Log zeigte `chunk 50/100/150/200 …`
+  weiterlaufen und **keine** `generation aborted by client`-Zeile.
+- 0.7.1 im selben Szenario: nächste Anfrage HTTP 200 nach **237 s**, die darauf nach **3 s**.
+  Der Deadlock ist weg, die verwaiste Generierung läuft aber ihre vollen `max_tokens` zu Ende.
+
+- [ ] **Getrennten Client erkennen und die Generierung abbrechen.** Kern der verbleibenden Schwäche:
+      ein weggefallener HTTP-Client finalisiert den Async-Generator nicht, also feuert niemand
+      `cancel`. Ansatz: in beiden Adaptern `request.is_disconnected()` pollen (oder die
+      Starlette-Disconnect-Nachricht auswerten) und den Strom aktiv schließen. Dann kommt der Slot
+      sofort zurück statt nach bis zu `generation_timeout`.
+- [ ] Zwei HA-Agenten gleichzeitig laufen durch die Serialisierung nacheinander und reißen damit
+      HAs 300-s-Pipeline-Timeout (am 2026-09-20 beide fehlgeschlagen). Entweder nur einen Agenten
+      aktiv halten, oder `max_tokens`/Kontext senken, damit eine Runde deutlich unter 150 s bleibt.
+- [ ] `RuntimeError: generator didn't stop after athrow()` taucht beim Finalisieren eines
+      abgebrochenen Streams auf (im Skript reproduziert). Kosmetisch, aber es landet im Add-on-Log —
+      beim Disconnect-Fix mitnehmen.
