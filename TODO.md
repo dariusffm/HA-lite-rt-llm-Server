@@ -126,11 +126,12 @@ Gemessen auf dem HAOS-Host, nicht abgeleitet:
 - 0.7.1 im selben Szenario: nächste Anfrage HTTP 200 nach **237 s**, die darauf nach **3 s**.
   Der Deadlock ist weg, die verwaiste Generierung läuft aber ihre vollen `max_tokens` zu Ende.
 
-- [ ] **Getrennten Client erkennen und die Generierung abbrechen.** Kern der verbleibenden Schwäche:
-      ein weggefallener HTTP-Client finalisiert den Async-Generator nicht, also feuert niemand
-      `cancel`. Ansatz: in beiden Adaptern `request.is_disconnected()` pollen (oder die
-      Starlette-Disconnect-Nachricht auswerten) und den Strom aktiv schließen. Dann kommt der Slot
-      sofort zurück statt nach bis zu `generation_timeout`.
+- [x] **Getrennten Client erkennen und die Generierung abbrechen** (0.7.2, auf dem Host abgenommen).
+      `adapters/disconnect.py` fragt beim Warten `Request.is_disconnected()`, auf allen vier
+      Endpunkten, streamend wie nicht. Ein Wächter pro Anfrage statt pro Token — sonst wird er
+      abgeräumt, sobald das Token da ist, und käme im interessanten Fall nie zum Zug.
+      Messreihe nach Client-Abbruch: 0.7.0 nie · 0.7.1 237 s · **0.7.2 3 s**, Logzeile
+      `client disconnected; generation cancelled` bestätigt.
 - [ ] Zwei HA-Agenten gleichzeitig laufen durch die Serialisierung nacheinander und reißen damit
       HAs 300-s-Pipeline-Timeout (am 2026-09-20 beide fehlgeschlagen). Entweder nur einen Agenten
       aktiv halten, oder `max_tokens`/Kontext senken, damit eine Runde deutlich unter 150 s bleibt.
