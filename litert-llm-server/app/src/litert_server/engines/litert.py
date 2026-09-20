@@ -565,7 +565,13 @@ class LiteRTEngine:
         params: GenerationParams,
     ) -> AsyncIterator[Token]:
         thread_done = Event()
-        async with self._gate.acquire(confirm=lambda: thread_done.wait(CONFIRM_TIMEOUT_SECONDS)):
+        async with self._gate.acquire(
+            confirm=lambda: thread_done.wait(CONFIRM_TIMEOUT_SECONDS)
+        ) as holder:
+            # The slot comes back when the producer thread ends, even if this
+            # generator is never finalized — an HTTP client that disappears
+            # leaves it suspended and its ``finally`` unrun.
+            self._gate.release_when(holder, thread_done)
             async with closing(self._completion_inner(model, prompt, params, thread_done)) as s:
                 async for tok in s:
                     yield tok
@@ -619,10 +625,15 @@ class LiteRTEngine:
 
         The slot covers this call and anything nested inside it (prompt
         compaction's stage-one call runs under the same acquisition), and is
-        released only once the producer thread has confirmed it returned.
+        released once the producer thread has returned — which is what the
+        slot is tied to, because a client that disconnects does not finalize
+        this generator and its ``finally`` would never run.
         """
         thread_done = Event()
-        async with self._gate.acquire(confirm=lambda: thread_done.wait(CONFIRM_TIMEOUT_SECONDS)):
+        async with self._gate.acquire(
+            confirm=lambda: thread_done.wait(CONFIRM_TIMEOUT_SECONDS)
+        ) as holder:
+            self._gate.release_when(holder, thread_done)
             inner = self._chat_inner(model, messages, params, tools, thread_done)
             async with closing(inner) as stream:
                 async for tok in stream:

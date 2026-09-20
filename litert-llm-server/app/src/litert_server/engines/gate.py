@@ -28,10 +28,11 @@ rather than through a double that would not exercise it.
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import logging
+import threading
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from typing import Any
 
 from litert_server.domain.errors import EngineBusyError, EngineUnavailableError
 
@@ -42,7 +43,27 @@ log = logging.getLogger(__name__)
 #: notice a cancel, not to finish its work.
 CONFIRM_TIMEOUT_SECONDS = 30.0
 
-_held: contextvars.ContextVar[bool] = contextvars.ContextVar("engine_gate_held", default=False)
+#: Upper bound for the watcher that releases the slot when the caller never
+#: unwinds. Past it the engine is declared unusable rather than left holding a
+#: slot nobody will give back.
+WATCH_TIMEOUT_SECONDS = 900.0
+
+
+class Holder:
+    """One acquisition of the slot. Identity matters, contents do not."""
+
+    __slots__ = ("released",)
+
+    def __init__(self) -> None:
+        self.released = False
+
+
+# Re-entrancy is keyed on the asyncio task, not on a context variable: an
+# async generator does not get its own context, so a ``set()`` inside one
+# lands in whatever context first iterated it. A later, unrelated acquire in
+# that same context then looked nested and skipped the semaphore entirely —
+# the gate stopped serializing. One request is one task, so task identity is
+# both correct and impossible to leak.
 
 
 class EngineGate:
@@ -61,6 +82,9 @@ class EngineGate:
         self._on_unrecoverable = on_unrecoverable
         self._waiting = 0
         self._unavailable: str | None = None
+        self._holder: Holder | None = None
+        self._watchers: set[asyncio.Task[None]] = set()
+        self._owners: set[asyncio.Task[Any]] = set()
 
     @property
     def available(self) -> bool:
@@ -78,19 +102,62 @@ class EngineGate:
             if self._on_unrecoverable is not None:
                 self._on_unrecoverable(reason)
 
+    def _release(self, holder: Holder) -> None:
+        """Give the slot back, at most once per acquisition.
+
+        Two paths race to do this — the caller unwinding, and the watcher
+        seeing the producer thread end — and either may be the only one that
+        ever happens. Making it idempotent is what lets both exist.
+        """
+        if holder.released or self._holder is not holder:
+            return
+        holder.released = True
+        self._sem.release()
+
+    def release_when(self, holder: Holder, finished: threading.Event) -> None:
+        """Release the slot once ``finished`` is set, whatever the caller does.
+
+        An HTTP client that simply disappears does not finalize the async
+        generator serving it: Python leaves it suspended, so the ``finally``
+        that would release the slot never runs and the engine is held for
+        good. The producer thread does end either way, so that is what the
+        slot is tied to. Past ``WATCH_TIMEOUT_SECONDS`` nothing is left
+        hanging silently — the engine is declared unusable and the process
+        makes way for a restart.
+        """
+
+        async def watch() -> None:
+            done = await asyncio.to_thread(finished.wait, WATCH_TIMEOUT_SECONDS)
+            if done:
+                self._release(holder)
+            elif not holder.released:
+                self._fail(
+                    "a generation's producer thread never finished within "
+                    f"{WATCH_TIMEOUT_SECONDS:.0f}s"
+                )
+
+        task = asyncio.create_task(watch())
+        self._watchers.add(task)
+        task.add_done_callback(self._watchers.discard)
+
     @asynccontextmanager
-    async def acquire(self, *, confirm: Callable[[], bool] | None = None) -> AsyncIterator[None]:
+    async def acquire(self, *, confirm: Callable[[], bool] | None = None) -> AsyncIterator[Holder]:
         """Hold the engine slot for the duration of the block.
+
+        The block receives a ``Holder``: pass it to ``release_when`` together
+        with the producer's completion event so the slot comes back even if
+        this block never unwinds.
 
         ``confirm`` is called on the way out, off the event loop, and must
         return ``True`` once the native work has finished. Returning
         ``False`` means a thread is unaccounted for: the slot is *not*
         released and the engine is marked unusable.
         """
-        if _held.get():
+        owner = asyncio.current_task()
+        if owner is not None and owner in self._owners:
             # Same request, nested call (compaction's stage one inside a
             # generation): it already owns the slot.
-            yield
+            yield Holder()
             return
 
         if self._unavailable is not None:
@@ -116,18 +183,22 @@ class EngineGate:
             self._sem.release()
             raise EngineUnavailableError(self._unavailable)
 
-        token = _held.set(True)
+        holder = Holder()
+        self._holder = holder
+        if owner is not None:
+            self._owners.add(owner)
         try:
-            yield
+            yield holder
         finally:
-            _held.reset(token)
+            if owner is not None:
+                self._owners.discard(owner)
             confirmed = True
-            if confirm is not None:
+            if confirm is not None and not holder.released:
                 # Off the loop: waiting for a thread must not stall the server.
                 confirmed = await asyncio.to_thread(confirm)
             if confirmed:
-                self._sem.release()
-            else:
+                self._release(holder)
+            elif not holder.released:
                 self._fail(
                     "a generation's native work did not finish within "
                     f"{CONFIRM_TIMEOUT_SECONDS:.0f}s; the slot stays held"

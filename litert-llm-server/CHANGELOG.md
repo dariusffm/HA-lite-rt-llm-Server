@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.1 — 2026-09-20
+
+Fixes two faults in 0.7.0's engine gate, both found by running it on real
+hardware rather than in tests.
+
+- **The slot is no longer tied to the generator unwinding.** A client that
+  disconnects does not finalize the async generator serving it: Python
+  leaves it suspended, so the `finally` that released the slot never ran.
+  The add-on then held the engine for good — CPU idle, `/readyz` still
+  "ready", every later request waiting forever, and only a restart clearing
+  it. The slot is now released when the producer thread ends, which happens
+  either way; a watcher declares the engine unusable if that never comes.
+- **Re-entrancy no longer leaks between requests.** It was keyed on a
+  context variable set inside an async generator, and async generators do
+  not get their own context: the flag landed in whichever context first
+  iterated the stream. A later acquire there looked like a nested call and
+  skipped the semaphore, so the gate could stop serializing altogether. It
+  is now keyed on the asyncio task, which is one per request.
+- Releasing twice — once by the caller, once by the watcher — is harmless;
+  without that guard the second release would have added a permit and let
+  two requests onto the engine at once.
+
 ## 0.7.0 — 2026-09-20
 
 - The engine now serves one request at a time. Only model loading was

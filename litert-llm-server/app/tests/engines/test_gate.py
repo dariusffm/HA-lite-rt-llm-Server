@@ -168,3 +168,89 @@ async def test_the_slot_survives_an_exception_inside_the_block():
 
     async with gate.acquire():  # would hang if the slot leaked
         pass
+
+
+async def test_abandoned_stream_still_returns_the_slot():
+    """The incident this guards, measured on the host on 2026-09-20.
+
+    An HTTP client that disappears does not finalize the async generator
+    serving it: Python leaves it suspended, so a release sitting in its
+    ``finally`` never runs. The add-on then held the slot for good — CPU at
+    0.1%, `/readyz` still "ready", and every later request, however small,
+    waited forever. Only a restart cleared it.
+
+    The producer thread ends either way, so that is what the slot is tied to.
+    The contender runs in its own task because one request is one task; a
+    nested acquire in the *same* task is the compaction case and is meant to
+    pass straight through.
+    """
+    gate = EngineGate(wait_timeout=0.05)
+    thread_done = threading.Event()
+    streaming = asyncio.Event()
+
+    async def request() -> None:
+        async def stream():
+            async with gate.acquire() as holder:
+                gate.release_when(holder, thread_done)
+                for i in range(100):
+                    yield i
+
+        generator = stream()
+        await generator.__anext__()
+        streaming.set()
+        await asyncio.sleep(30)  # suspended, never closed — the client vanished
+
+    holder_task = asyncio.create_task(request())
+    await streaming.wait()
+
+    async def contender() -> str:
+        async with gate.acquire():
+            return "in"
+
+    with pytest.raises(EngineBusyError):
+        await asyncio.create_task(contender())
+
+    thread_done.set()  # the producer thread returns
+    for _ in range(100):
+        await asyncio.sleep(0.02)
+        if not gate._sem.locked():
+            break
+
+    assert await asyncio.create_task(contender()) == "in"
+
+    holder_task.cancel()
+
+
+async def test_double_release_frees_the_slot_only_once():
+    """Both paths may fire: the caller unwinding and the watcher.
+
+    If the guard were missing, the second release would add a permit and the
+    gate would let two requests onto the engine at once — the very thing it
+    exists to prevent.
+    """
+    gate = EngineGate(wait_timeout=0.05)
+    thread_done = threading.Event()
+    thread_done.set()
+
+    async with gate.acquire() as holder:
+        gate.release_when(holder, thread_done)
+        await asyncio.sleep(0.05)  # let the watcher release first
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def occupy() -> None:
+        async with gate.acquire():
+            entered.set()
+            await release.wait()
+
+    task = asyncio.create_task(occupy())
+    await entered.wait()
+
+    # A separate task, so no re-entrancy: one holder means no room.
+    with pytest.raises(EngineBusyError):
+        async with gate.acquire():
+            pass
+
+    release.set()
+    await task
