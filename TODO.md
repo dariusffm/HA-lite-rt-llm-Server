@@ -44,14 +44,14 @@ Spec `docs/superpowers/specs/2026-09-16-conversation-reuse-design.md`, Plan `doc
 - [x] Engine hält die letzte Conversation, hängt Fortsetzungen an (Tool-Runden und Folgefragen), Option `conversation_ttl`; auf HA: Folgerunden `appended 1 turn`, kein Pipeline-Timeout mehr
 - [x] Schalten über das Modell: `HassTurnOn` ohne `name` wird seit 0.4.1 im Add-on repariert (`services/repair.py`, Option `tool_call_repair`); auf HA abgenommen: Lampe an, „The Wohnzimmer-Fenster-Lampe is now on.“ Offen: Reparatur bei mehreren Tool-Calls pro Runde (bleibt bewusst „mehrdeutig → unverändert“)
 - [ ] Mehrere neue Turns (parallele Tool-Ergebnisse) laufen frisch, litert_lm 0.17 kann nichts ohne Antwort anhängen (Spec §7); bei neuer litert_lm-Version erneut prüfen
-- [ ] Cache-Schlüssel der Kürzung nicht nach Modell getrennt (Minor aus dem 0.3.x-Review); Engine-Semaphore weiter offen
+- [x] Cache-Schlüssel der Kürzung nach Modell getrennt; Cache-Hits aktualisieren die LRU-Reihenfolge (0.5.1). Engine-Semaphore bleibt separat offen.
 
 ## Offen daneben
 
 - [ ] Befund 2026-09-16 14:24 (HA, „suche wohnzimmer fenster lampe und schalte die ein“): Runde 1 ok (88 s, `GetLiveContext{area: Wohnzimmer}`), Runde 2 (Fortsetzung) >200 s ohne Ausgabe bei ~85 % CPU → HA-Timeout 300 s; danach bleibt die Antwort offen (0 % CPU, kein Access-Log) bis zur nächsten Anfrage — trat auch in 0.3.3 auf. Zwei Probleme: (1) Endlos-Generierung in Runde 2 (Fragment unbekannt), (2) Abbruchpfad blockiert (`cancel_process`/`close` auf dem Loop-Thread?). 0.4.3: Zeitstempel-Diagnose, WARNING mit Fragment bei Abbruch, Option `generation_timeout`, Cancel im Daemon-Thread; danach Satz erneut testen und Log lesen
 - [ ] Codex über ccr (`ccr default-codex -- exec …`, lokal `ollama/qwen3.8:27b`) als Implementierer: erster Versuch scheiterte an `apply_patch invoked with incompatible payload` (Modell erzeugt ungültige Patch-Payloads). Recherche: Codex-Konfiguration für lokale Modelle (`~/.codex/config.toml`: Werkzeugform für apply_patch/Freitext vs. Funktion, `features`, `model_reasoning_effort`, kürzere Briefs, evtl. anderes Ollama-Modell); Nutzer nutzt dieselbe Kombination in einem anderen Projekt erfolgreich
 - [ ] RAM-Bedarf pro `context_length` messen und dokumentieren (16384 → Prozess auf dem HA-Host nach Modell-Laden gestorben, vermutlich OOM); Schutz: Watchdog an, ggf. Kontext beim Start gegen freien RAM prüfen
-- [ ] `config.yaml` `log_level` erlaubt `critical`, `config.py` `LogLevel` kennt `notice`/`fatal` statt `critical` → Auswahl `critical` in HA schlägt beim Start fehl; Werte angleichen (vorbestehend)
+- [x] `log_level: critical` wird seit 0.3.3 akzeptiert; Code und Regressionstest erneut geprüft.
 - [x] `engines/litert.py`: Producer-Thread hängt nicht mehr in `q.put` nach Client-Abbruch; `except: pass` um close()/cancel() loggen jetzt (0.2.3)
 - [x] Kontextüberlauf (`Input token ids are too long`): Engine kürzt die Historie rundenweise und versucht es erneut (0.2.3); auf HA abgenommen
 - [x] Tool-Aufrufe mit constrained decoding (0.2.4): behebt `Failed to parse tool calls` bei unquotierten Argumenten; Lampenfrage mit `GetLiveContext{domain: light}` auf HA abgenommen

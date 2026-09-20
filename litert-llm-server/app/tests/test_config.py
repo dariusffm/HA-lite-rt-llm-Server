@@ -129,3 +129,13 @@ def test_generation_timeout_rejects_out_of_range(monkeypatch):
     monkeypatch.setenv("LITERT_GENERATION_TIMEOUT", "601")
     with pytest.raises(ValidationError):
         Settings()
+
+
+def test_switching_defaults_match_addon_schema(monkeypatch):
+    from pathlib import Path
+
+    import yaml
+
+    monkeypatch.delenv("LITERT_SWITCHING_TOOL_NAMES", raising=False)
+    addon = yaml.safe_load((Path(__file__).parents[2] / "config.yaml").read_text())
+    assert Settings().switching_tool_names == addon["options"]["switching_tool_names"]

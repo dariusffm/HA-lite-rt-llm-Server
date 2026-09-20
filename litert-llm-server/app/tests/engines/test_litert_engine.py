@@ -743,3 +743,34 @@ async def test_timeout_closes_conversation_that_ends_normally_after_cancel(tmp_p
     assert conv.cancelled >= 1
     assert conv.closed == 1, "producer returned normally after the abort: nobody closed"
     assert engine._held is None
+
+
+@pytest.mark.parametrize("fail_on_close", [False, True])
+def test_failed_model_switch_clears_closed_engine(tmp_path, monkeypatch, fail_on_close):
+    from unittest.mock import Mock
+
+    from litert_server.engines import litert
+
+    for name in ("old", "new"):
+        (tmp_path / f"{name}.litertlm").touch()
+    previous = Mock()
+    if fail_on_close:
+        previous.close.side_effect = RuntimeError("close failed")
+    replacement = Mock()
+    factory = Mock(side_effect=[RuntimeError("load failed"), replacement])
+    if fail_on_close:
+        factory.side_effect = [replacement]
+    monkeypatch.setattr(litert, "Engine", factory)
+    engine = LiteRTEngine(models_dir=tmp_path)
+    engine._engine = previous
+    engine.current_model = "old"
+
+    with pytest.raises(RuntimeError):
+        engine._ensure_loaded("new")
+
+    assert engine.current_model is None
+    assert engine._engine is None
+    engine._ensure_loaded("old")
+    assert engine._engine is replacement
+    assert engine.current_model == "old"
+    previous.close.assert_called_once()

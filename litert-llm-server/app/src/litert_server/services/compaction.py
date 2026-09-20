@@ -58,7 +58,7 @@ class CompactingInferenceService:
         self._timeout = stage_one_timeout
         self._cache_size = cache_size
         self._cache: OrderedDict[
-            tuple[str, str | None, frozenset[str], frozenset[str]], RelevanceQuery
+            tuple[str, str, str | None, frozenset[str], frozenset[str]], RelevanceQuery
         ] = OrderedDict()
 
     # -- InferenceService -----------------------------------------------------
@@ -148,9 +148,10 @@ class CompactingInferenceService:
         # The previous user message is part of the key too, so an elliptical
         # follow-up ("und welche davon?") doesn't reuse another conversation's
         # cached answer just because the follow-up text matches.
-        cache_key = (question, previous_question, frozenset(domains), frozenset(areas))
+        cache_key = (model, question, previous_question, frozenset(domains), frozenset(areas))
         hit = self._cache.get(cache_key)
         if hit is not None:
+            self._cache.move_to_end(cache_key)
             return hit, True
         turns = build_stage_one_turns(question, domains, areas, previous_question)
         try:

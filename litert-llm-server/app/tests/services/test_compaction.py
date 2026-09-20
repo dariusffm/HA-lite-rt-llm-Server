@@ -378,3 +378,24 @@ async def test_logs_entity_counts_on_success(caplog: pytest.LogCaptureFixture):
         await _run(svc, [SYSTEM, QUESTION])
 
     assert "entities 3→1" in caplog.text
+
+
+async def test_relevance_cache_is_scoped_to_model():
+    inner = ScriptedEngine(replies=[LIGHTS_ONLY, "first", COVER_ONLY, "second"])
+    svc = CompactingInferenceService(inner)
+    for model in ("model-a", "model-b"):
+        _ = [t async for t in svc.stream_chat(model, [SYSTEM, QUESTION], PARAMS)]
+    stage_one = [call for call in inner.chat_calls if call.params.response_pattern]
+    assert [call.model for call in stage_one] == ["model-a", "model-b"]
+
+
+async def test_relevance_cache_retains_recently_used_entry():
+    inner = ScriptedEngine(replies=[LIGHTS_ONLY] * 4)
+    svc = CompactingInferenceService(inner, cache_size=2)
+    entities = [{"names": "Lamp", "domain": "light"}]
+    for question in ("first", "second", "first", "third"):
+        await svc._relevance("m", question, None, entities)
+    _, cached = await svc._relevance("m", "first", None, entities)
+    assert cached
+    _, cached = await svc._relevance("m", "second", None, entities)
+    assert not cached

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.1 — 2026-09-20
+
+- Clear the loaded-model state before closing/replacing an engine. If close
+  or loading the replacement fails, the next request reloads the model
+  instead of attempting to reuse an already closed engine.
+- Scope prompt-compaction cache entries by model to prevent decisions from
+  one model being reused for another. Cache hits now refresh recency so
+  frequently used entries survive eviction.
+- Include HassTurnOn in the Python settings defaults, matching the add-on's
+  switching protection when starting the application directly.
+- Add regression coverage for failed model switches, cache isolation and
+  eviction, and agreement between Python and add-on switching defaults.
+
 ## 0.5.0 — 2026-09-17
 
 - `HassTurnOn` is a switching tool by default. An untargeted `HassTurnOn`

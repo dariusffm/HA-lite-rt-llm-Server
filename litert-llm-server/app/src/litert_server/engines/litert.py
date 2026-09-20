@@ -402,8 +402,11 @@ class LiteRTEngine:
             file = self._model_file(model_name)
             if not file.exists():
                 raise FileNotFoundError(f"Model file not found: {file}")
-            if self._engine is not None:
-                self._engine.close()
+            previous_engine = self._engine
+            self._engine = None
+            self.current_model = None
+            if previous_engine is not None:
+                previous_engine.close()
             self._engine = Engine(
                 model_path=str(file), backend=Backend.CPU, max_num_tokens=self.max_num_tokens
             )
