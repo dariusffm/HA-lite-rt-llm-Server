@@ -92,7 +92,6 @@ class _TokenQueue(queue.Queue[Any]):
 # giving up on it: bounds how long a slow ``cancel_process`` can hold up the
 # consumer coroutine (R4), while still letting a fast cancel complete before
 # this call returns.
-_CANCEL_JOIN_SECONDS = 0.1
 
 # How long a poll for the next queue item waits before re-checking the
 # generation-timeout budget, so a producer that emits nothing is still
@@ -128,12 +127,18 @@ def _cancel_and_log(cancel: Cancel) -> None:
         log.debug("cancel_process took %.2fs", time.monotonic() - started)
 
 
-def _fire_cancel(cancel: Cancel) -> None:
+def _fire_cancel(cancel: Cancel) -> Thread:
     """Run ``cancel`` off the event loop so a slow ``cancel_process`` never
-    blocks the consumer coroutine (R4)."""
+    blocks the consumer coroutine (R4).
+
+    The thread is *not* joined here: this runs on the event-loop thread, and
+    waiting even briefly for a native abort stalls every other request in the
+    process. The thread is returned so a caller that genuinely needs the
+    abort to have finished can wait for it away from the loop.
+    """
     thread = Thread(target=_cancel_and_log, args=(cancel,), daemon=True)
     thread.start()
-    thread.join(_CANCEL_JOIN_SECONDS)
+    return thread
 
 
 async def _bridge_producer(
@@ -373,6 +378,18 @@ def _token_count(conversation: Any) -> Any:
     return count if isinstance(count, int) else "?"
 
 
+def _close_in_background(conversation: Any) -> Thread:
+    """Close a conversation off the event loop.
+
+    ``Conversation.close`` reaches into the native runtime and can block; on
+    the loop thread that stalls the whole server. The caller has already
+    dropped its reference, so nothing else can reach this conversation.
+    """
+    thread = Thread(target=_close_quietly, args=(conversation,), daemon=True)
+    thread.start()
+    return thread
+
+
 def _close_quietly(conversation: Any) -> None:
     """Close a conversation, swallowing errors.
 
@@ -456,7 +473,7 @@ class LiteRTEngine:
             log.debug("conversation reuse: dropped (%s, busy: left to its request)", reason)
             return
         log.debug("conversation reuse: dropped (%s)", reason)
-        _close_quietly(held.conversation)
+        _close_in_background(held.conversation)
 
     def _detach_held(self, held: _Held, reason: str) -> None:
         """Forget the held conversation without closing it. Event-loop

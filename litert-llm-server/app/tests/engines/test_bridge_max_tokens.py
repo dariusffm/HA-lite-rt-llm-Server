@@ -8,6 +8,7 @@ would inherit it from whichever request opened it.
 """
 
 import queue
+import threading
 from typing import Any
 
 from litert_server.engines.litert import _bridge_producer
@@ -22,18 +23,16 @@ def _producer(count: int):
 
 
 async def test_stream_stops_at_max_tokens_and_cancels_the_producer():
-    cancelled = False
+    # cancel runs in its own thread (it must never block the event loop), so
+    # the test waits for it instead of assuming it already ran.
+    cancelled = threading.Event()
 
-    def cancel() -> None:
-        nonlocal cancelled
-        cancelled = True
-
-    tokens = [tok async for tok in _bridge_producer(_producer(50), cancel, max_tokens=3)]
+    tokens = [tok async for tok in _bridge_producer(_producer(50), cancelled.set, max_tokens=3)]
 
     texts = [t.text for t in tokens if t.text]
     assert texts == ["t0", "t1", "t2"]
     assert tokens[-1].finish_reason == "length"
-    assert cancelled, "the native decode would keep running with nobody reading it"
+    assert cancelled.wait(timeout=2), "the native decode would keep running with nobody reading it"
 
 
 async def test_reply_shorter_than_the_limit_still_finishes_normally():

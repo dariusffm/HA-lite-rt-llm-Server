@@ -106,7 +106,7 @@ Revision 1: erst Abbruch/Bereinigung (`aclose()`-Kette), dann das Engine-Gate.
 - [ ] Hängender Producer → `/readyz` false, `log.error`, `sys.exit(1)` (s6 startet neu)
 
 Security-Befunde aus dem Review, bewusst **nicht** in diesen Branches (je ein eigener Schnitt):
-- [ ] **Keine Authentifizierung.** Der Dienst bindet auf `0.0.0.0:8080` im LAN, jeder Host kann Inferenz auslösen, Modelle ziehen und löschen. Mittelfristig `ingress: true` + Bind auf `127.0.0.1`, oder ein Pflicht-Bearer-Token als Option. Bis dahin die Annahme „vertrauenswürdiges LAN" in `DOCS.md` festhalten
+- [ ] **Keine Authentifizierung.** Der Dienst bindet auf `0.0.0.0:8080` im LAN, jeder Host kann Inferenz auslösen, Modelle ziehen und löschen. **Entschieden am 2026-09-20: optionaler Bearer-Token** als neue Option `api_key` — leer lässt alles wie heute (keine erzwungene Migration), gesetzt verlangen alle Routen den Token. HAs Ollama- und LiteLLM-Integration haben beide ein API-Key-Feld, die Migration sind zwei Einträge in HA. `ingress` + Bind auf `127.0.0.1` wurde verworfen, weil es Port 8080 aus dem LAN nimmt und beide HA-Integrationen sowie die curl-Rollout-Prüfung vom Mac bricht
 - [ ] **Kein Revision-Pinning.** `CatalogEntry` hat keine `revision`, `hf_hub_download` zieht `main` — der Inhalt hinter einem Modellnamen kann sich ändern. Commit-SHA pinnen, idealerweise `sha256` prüfen
 - [ ] **Modelltausch ist nicht atomar.** `pull()` löscht das Ziel vor `_link_or_copy`; ein Abbruch mitten im Kopieren zerstört ein vorher funktionierendes Modell. Nach `.part` schreiben und mit `os.replace` umbenennen
 - [ ] **Kein Plattenplatz-Check.** Preload mehrerer Modelle kann `/data` der HA-Instanz füllen; vor dem Download freien Platz gegen die erwartete Größe prüfen
