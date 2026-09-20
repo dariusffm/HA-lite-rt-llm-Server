@@ -24,6 +24,7 @@ from litert_server.domain.inference import (
     collect_chat,
     collect_completion,
 )
+from litert_server.domain.model_names import InvalidModelNameError
 from litert_server.domain.model_registry import ModelRegistry
 from litert_server.domain.types import (
     ChatTurn,
@@ -187,6 +188,11 @@ def _error_frame(exc: Exception) -> str:
 
 
 def _error_response(exc: Exception) -> JSONResponse:
+    if isinstance(exc, InvalidModelNameError):
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"message": str(exc), "type": "invalid_request_error"}},
+        )
     log.exception("engine error")
     return JSONResponse(
         status_code=500,

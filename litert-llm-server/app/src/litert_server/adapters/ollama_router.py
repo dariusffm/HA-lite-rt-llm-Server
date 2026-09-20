@@ -21,6 +21,7 @@ from litert_server.domain.inference import (
     collect_chat,
     collect_completion,
 )
+from litert_server.domain.model_names import InvalidModelNameError
 from litert_server.domain.model_registry import ModelRegistry
 from litert_server.domain.types import (
     ChatTurn,
@@ -179,6 +180,8 @@ def _error_record(exc: Exception) -> str:
 
 
 def _error_response(exc: Exception) -> JSONResponse:
+    if isinstance(exc, InvalidModelNameError):
+        return JSONResponse(status_code=400, content={"error": str(exc)})
     log.exception("engine error")
     return JSONResponse(status_code=500, content={"error": str(exc)})
 
@@ -371,9 +374,12 @@ def build_ollama_router(
             },
         }
 
-    @router.delete("/delete")
-    async def delete(req: OllamaDeleteRequest) -> dict[str, Any]:
-        await registry.delete(req.name)
+    @router.delete("/delete", response_model=None)
+    async def delete(req: OllamaDeleteRequest) -> dict[str, Any] | JSONResponse:
+        try:
+            await registry.delete(req.name)
+        except InvalidModelNameError as exc:
+            return _error_response(exc)
         return {"status": "success"}
 
     return router

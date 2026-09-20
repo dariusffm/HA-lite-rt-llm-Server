@@ -22,6 +22,7 @@ from litert_lm import (
 )
 from litert_lm.interfaces import Tool
 
+from litert_server.domain.model_names import model_path
 from litert_server.domain.types import (
     ChatTurn,
     GenerationParams,
@@ -393,7 +394,7 @@ class LiteRTEngine:
         self._held: _Held | None = None
 
     def _model_file(self, model_name: str) -> Path:
-        return self.models_dir / f"{model_name}.litertlm"
+        return model_path(self.models_dir, model_name, ".litertlm")
 
     def _ensure_loaded(self, model_name: str) -> None:
         with self._lock:

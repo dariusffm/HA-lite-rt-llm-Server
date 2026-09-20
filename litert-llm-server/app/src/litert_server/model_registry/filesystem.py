@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from litert_server.domain.model_names import model_path
 from litert_server.domain.types import ModelInfo
 
 MODEL_EXT = ".litertlm"
@@ -35,7 +36,7 @@ class FilesystemCache:
         return out
 
     def path_for(self, name: str) -> Path:
-        return self.root / f"{name}{MODEL_EXT}"
+        return model_path(self.root, name, MODEL_EXT)
 
     def delete(self, name: str) -> None:
         # missing_ok also removes dangling symlinks, which ``exists()`` hides.
