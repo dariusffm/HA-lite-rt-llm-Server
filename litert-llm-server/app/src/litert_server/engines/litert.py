@@ -418,7 +418,10 @@ class LiteRTEngine:
                 return
             file = self._model_file(model_name)
             if not file.exists():
-                raise FileNotFoundError(f"Model file not found: {file}")
+                # The name, not the path: this message is returned to the
+                # client and the absolute container path is an unnecessary
+                # hint about the filesystem.
+                raise FileNotFoundError(f"model not found: {model_name}")
             previous_engine = self._engine
             self._engine = None
             self.current_model = None

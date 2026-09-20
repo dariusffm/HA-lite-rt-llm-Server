@@ -86,3 +86,28 @@ LiteLLM-Proxy direkt gegen das Add-on; am 2026-09-20 auf dem Host abgenommen (Pi
 - [ ] Entscheidung: `user=conversation_id` als expliziten Konversationsschlüssel nutzen statt der Heuristik in
       `engines/continuation.py`? Gilt nur für den OpenAI-Pfad, der Ollama-Pfad braucht die Heuristik weiter
 - [ ] `max_tokens` kommt nicht mit → Add-on-Default 512; prüfen, ob das für Abschlussantworten reicht
+
+## Stabilitätsrunde 2 (Plan: `docs/superpowers/plans/2026-09-20-stability-round-2.md`)
+
+Branch A `fix/config-wiring-and-completion-stream` (0.6.0), lokal abgenommen, **nicht ausgerollt**:
+- [x] Modellnamen validieren, bevor sie zu Pfaden werden (`DELETE /api/delete` konnte `.litertlm`-Dateien außerhalb von `/data/models` löschen; Port ohne Auth im LAN)
+- [x] `HF_TOKEN` für s6 persistieren (Filter traf die `printenv`-Zeile nie), Tokendatei nicht mehr welt-lesbar
+- [x] `default_model`, `max_tokens`, `temperature` erreichen beide Adapter; `model` ist optional
+- [x] `preload_models` beim Start ziehen, im Hintergrund, mit ausgewertetem Fehlerstatus
+- [x] `max_tokens` wirkt im Chatpfad (Consumer-seitig, damit die Wiederverwendung erhalten bleibt)
+- [x] `/v1/completions` streamt bei `stream: true`
+- [x] Fehlermeldung eines fehlenden Modells nennt nicht mehr den absoluten Containerpfad
+
+Branch B `fix/engine-serialization` (geplant 0.7.0), **noch nicht begonnen** — Reihenfolge laut
+Revision 1: erst Abbruch/Bereinigung (`aclose()`-Kette), dann das Engine-Gate.
+- [ ] Punkt 1: gemeinsame Zugriffskontrolle, Klammer über die ganze Anfrage (die Kompaktierung ruft die Engine zweimal), Gate als eigenes Modul `engines/gate.py`, Wartedeckel = `generation_timeout`, Warteschlangentiefe 4
+- [ ] Punkt 2: `_fire_cancel`-`join` vom Event-Loop nehmen, `_drop_held`-`close()` ebenso, explizite `aclose()`-Kette, `producer_done` nach `_bridge_producer`, TTL-Timer unter das Gate
+- [ ] `EngineBusyError`/`EngineUnavailableError` in `domain/errors.py`, Adapter antworten 503 mit `Retry-After`; `prime()` vor dem Bau der `StreamingResponse`, sonst ist 503 im Streaming-Pfad unerreichbar
+- [ ] Hängender Producer → `/readyz` false, `log.error`, `sys.exit(1)` (s6 startet neu)
+
+Security-Befunde aus dem Review, bewusst **nicht** in diesen Branches (je ein eigener Schnitt):
+- [ ] **Keine Authentifizierung.** Der Dienst bindet auf `0.0.0.0:8080` im LAN, jeder Host kann Inferenz auslösen, Modelle ziehen und löschen. Mittelfristig `ingress: true` + Bind auf `127.0.0.1`, oder ein Pflicht-Bearer-Token als Option. Bis dahin die Annahme „vertrauenswürdiges LAN" in `DOCS.md` festhalten
+- [ ] **Kein Revision-Pinning.** `CatalogEntry` hat keine `revision`, `hf_hub_download` zieht `main` — der Inhalt hinter einem Modellnamen kann sich ändern. Commit-SHA pinnen, idealerweise `sha256` prüfen
+- [ ] **Modelltausch ist nicht atomar.** `pull()` löscht das Ziel vor `_link_or_copy`; ein Abbruch mitten im Kopieren zerstört ein vorher funktionierendes Modell. Nach `.part` schreiben und mit `os.replace` umbenennen
+- [ ] **Kein Plattenplatz-Check.** Preload mehrerer Modelle kann `/data` der HA-Instanz füllen; vor dem Download freien Platz gegen die erwartete Größe prüfen
+- [ ] **Auf dem Host prüfen:** druckt `bashio::config 'hf_token'` bei `log_level: trace` den Wert? Nur mit einem eigens erzeugten und danach widerrufenen Wegwerf-Token testen

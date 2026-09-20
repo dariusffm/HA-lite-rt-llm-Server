@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.0 — 2026-09-20
+
+- Model names from HTTP requests are validated before they become
+  filesystem paths. `DELETE /api/delete` passed the name through unchanged,
+  so `../name` reached outside `/data/models`; the port is published on the
+  LAN without authentication. Invalid names now answer HTTP 400.
+- `HF_TOKEN` is persisted for s6 again. The filter matched a bare
+  `HF_TOKEN` line that `printenv` never emits, so the token never reached
+  uvicorn and gated model downloads failed with 401. The file is no longer
+  world-readable.
+- `default_model`, `max_tokens` and `temperature` from the add-on options
+  now reach both adapters; they were read but never used, and the adapters
+  applied their own literals instead. Values sent by a client still win.
+  `model` may be omitted from a request and falls back to `default_model`.
+- `preload_models` is pulled on startup, in a background task so the port
+  binds immediately, with failures reported instead of silently drained.
+- `max_tokens` now also bounds replies on the chat path. It is enforced
+  while consuming tokens rather than when the conversation is created, so
+  a reused conversation does not inherit an earlier request's limit.
+- `/v1/completions` honours `stream: true` with SSE instead of answering
+  with one late JSON block.
+- A missing model no longer reports its absolute container path.
+
 ## 0.5.1 — 2026-09-20
 
 - Clear the loaded-model state before closing/replacing an engine. If close

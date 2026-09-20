@@ -305,9 +305,48 @@ def build_openai_router(
         )
 
     @router.post("/completions", response_model=None)
-    async def completions(req: CompletionRequest) -> CompletionResponse | JSONResponse:
+    async def completions(
+        req: CompletionRequest,
+    ) -> StreamingResponse | CompletionResponse | JSONResponse:
         model = req.model or resolved.model
         params = _gen_params(req, resolved)
+
+        async def sse_stream() -> AsyncIterator[str]:
+            completion_id = f"cmpl-{uuid.uuid4().hex}"
+            created = int(time.time())
+
+            def frame(text: str, finish: str | None) -> str:
+                chunk: dict[str, object] = {
+                    "id": completion_id,
+                    "object": "text_completion",
+                    "created": created,
+                    "model": model,
+                    "choices": [{"text": text, "index": 0, "finish_reason": finish}],
+                }
+                return f"data: {json.dumps(chunk)}\n\n"
+
+            finish_reason: str | None = None
+            try:
+                async for tok in engine.stream_completion(model, req.prompt, params):
+                    if tok.text:
+                        yield frame(tok.text, None)
+                    if tok.finish_reason is not None:
+                        finish_reason = tok.finish_reason
+            except Exception as exc:
+                # The status line is long gone, so the failure can only be
+                # reported inside the stream. The terminal frame still carries
+                # a finish_reason so a client that only checks the HTTP status
+                # does not silently keep a truncated completion.
+                yield frame("", "error")
+                yield _error_frame(exc)
+                yield "data: [DONE]\n\n"
+                return
+            yield frame("", finish_reason or "stop")
+            yield "data: [DONE]\n\n"
+
+        if req.stream:
+            return StreamingResponse(sse_stream(), media_type="text/event-stream")
+
         try:
             text, finish = await collect_completion(engine, model, req.prompt, params)
         except Exception as exc:
