@@ -27,16 +27,17 @@ async def test_generate_non_streaming(ollama_client: AsyncClient):
     assert body["response"] == "Hello, world!"
 
 
-async def test_generate_streams_error_record_on_engine_failure(
+async def test_generate_failure_before_any_output_is_an_http_error(
     ollama_client: AsyncClient, fake_engine: FakeEngine
 ):
     fake_engine.raise_error = RuntimeError("boom")
-    chunks = await post_ndjson(
-        ollama_client,
+    r = await ollama_client.post(
         "/api/generate",
-        {"model": "gemma-4-e2b", "prompt": "x", "stream": True},
+        json={"model": "gemma-4-e2b", "prompt": "x", "stream": True},
     )
-    assert chunks == [{"error": "boom"}]
+
+    assert r.status_code == 500
+    assert r.json() == {"error": "boom"}
 
 
 async def test_generate_non_streaming_engine_error(

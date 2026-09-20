@@ -18,18 +18,21 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from litert_server.adapters.defaults import GenerationDefaults
+from litert_server.domain.errors import EngineBusyError, EngineUnavailableError
 from litert_server.domain.inference import (
     ChatFinish,
     CompletionFinish,
     InferenceService,
     collect_chat,
     collect_completion,
+    prime,
 )
 from litert_server.domain.model_names import InvalidModelNameError
 from litert_server.domain.model_registry import ModelRegistry
 from litert_server.domain.types import (
     ChatTurn,
     GenerationParams,
+    Token,
     ToolCall,
     ToolSpec,
     coerce_tool_arguments,
@@ -189,6 +192,14 @@ def _error_frame(exc: Exception) -> str:
 
 
 def _error_response(exc: Exception) -> JSONResponse:
+    if isinstance(exc, EngineBusyError | EngineUnavailableError):
+        # The request is fine, the moment is not: one generation at a time.
+        log.warning("engine unavailable: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            headers={"Retry-After": "30"},
+            content={"error": {"message": str(exc), "type": "server_error"}},
+        )
     if isinstance(exc, InvalidModelNameError):
         return JSONResponse(
             status_code=400,
@@ -240,7 +251,7 @@ def build_openai_router(
         turns = _to_chat_turns(req.messages)
         tools = _to_tool_specs(req) if tools_enabled else None
 
-        async def sse_stream() -> AsyncIterator[str]:
+        async def sse_stream(tokens: AsyncIterator[Token]) -> AsyncIterator[str]:
             completion_id = f"chatcmpl-{uuid.uuid4().hex}"
             created = int(time.time())
 
@@ -260,7 +271,7 @@ def build_openai_router(
 
             finish_reason: str | None = None
             try:
-                async for tok in engine.stream_chat(model, turns, params, tools):
+                async for tok in tokens:
                     if tok.tool_calls:
                         yield frame(
                             {"tool_calls": _tool_calls_wire(tok.tool_calls, with_index=True)}
@@ -278,7 +289,14 @@ def build_openai_router(
             yield "data: [DONE]\n\n"
 
         if req.stream:
-            return StreamingResponse(sse_stream(), media_type="text/event-stream")
+            # Pull the first token here: the response object is built before
+            # anything is read, so a failure occurring before any output could
+            # otherwise only be reported inside a body that already said 200.
+            try:
+                _, tokens = await prime(engine.stream_chat(model, turns, params, tools))
+            except Exception as exc:
+                return _error_response(exc)
+            return StreamingResponse(sse_stream(tokens), media_type="text/event-stream")
 
         try:
             text, finish, calls = await collect_chat(engine, model, turns, params, tools)
@@ -311,7 +329,7 @@ def build_openai_router(
         model = req.model or resolved.model
         params = _gen_params(req, resolved)
 
-        async def sse_stream() -> AsyncIterator[str]:
+        async def sse_stream(tokens: AsyncIterator[Token]) -> AsyncIterator[str]:
             completion_id = f"cmpl-{uuid.uuid4().hex}"
             created = int(time.time())
 
@@ -327,7 +345,7 @@ def build_openai_router(
 
             finish_reason: str | None = None
             try:
-                async for tok in engine.stream_completion(model, req.prompt, params):
+                async for tok in tokens:
                     if tok.text:
                         yield frame(tok.text, None)
                     if tok.finish_reason is not None:
@@ -345,7 +363,11 @@ def build_openai_router(
             yield "data: [DONE]\n\n"
 
         if req.stream:
-            return StreamingResponse(sse_stream(), media_type="text/event-stream")
+            try:
+                _, tokens = await prime(engine.stream_completion(model, req.prompt, params))
+            except Exception as exc:
+                return _error_response(exc)
+            return StreamingResponse(sse_stream(tokens), media_type="text/event-stream")
 
         try:
             text, finish = await collect_completion(engine, model, req.prompt, params)

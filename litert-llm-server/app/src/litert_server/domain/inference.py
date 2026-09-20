@@ -52,6 +52,39 @@ class InferenceService(Protocol):
     ) -> AsyncIterator[Token]: ...
 
 
+async def prime(
+    stream: AsyncIterator[Token],
+) -> tuple[Token | None, AsyncIterator[Token]]:
+    """Pull the first token, and return it together with the full stream.
+
+    An adapter builds its ``StreamingResponse`` before anything is read, so
+    HTTP 200 is already on the wire by the time the engine is first touched.
+    A failure that happens before any output — the engine being busy, a
+    missing model — can then only be reported inside the body, where a
+    client that checks the status sees success. Pulling the first token in
+    the handler moves those failures back in front of the status line;
+    anything that goes wrong later is still reported in the stream, because
+    by then there is no other choice.
+    """
+    try:
+        first = await stream.__anext__()
+    except StopAsyncIteration:
+        return None, _empty_stream()
+
+    async def rest() -> AsyncIterator[Token]:
+        async with closing(stream):
+            yield first
+            async for token in stream:
+                yield token
+
+    return first, rest()
+
+
+async def _empty_stream() -> AsyncIterator[Token]:
+    return
+    yield  # pragma: no cover - makes this an async generator
+
+
 @asynccontextmanager
 async def closing(stream: AsyncIterator[Token]) -> AsyncIterator[AsyncIterator[Token]]:
     """Iterate ``stream`` and close it when the caller's frame unwinds.

@@ -35,7 +35,16 @@ async def test_chat_completion_streaming_sse(client: AsyncClient):
     assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
 
 
-async def test_chat_completion_streaming_engine_error(client: AsyncClient, fake_engine: FakeEngine):
+async def test_streaming_failure_before_any_output_is_an_http_error(
+    client: AsyncClient, fake_engine: FakeEngine
+):
+    """Nothing has been sent yet, so the failure belongs in the status line.
+
+    Until the first token is pulled in the handler, the response object was
+    already built and every failure — including a busy engine — arrived as an
+    error frame inside a 200 body, where a client that checks the status sees
+    success.
+    """
     fake_engine.raise_error = RuntimeError("boom")
     payload = {
         "model": "gemma-4-e2b",
@@ -43,19 +52,10 @@ async def test_chat_completion_streaming_engine_error(client: AsyncClient, fake_
         "max_tokens": 50,
         "stream": True,
     }
-    async with client.stream("POST", "/v1/chat/completions", json=payload) as r:
-        assert r.status_code == 200
-        assert r.headers["content-type"].startswith("text/event-stream")
-        events: list[str] = []
-        async for line in r.aiter_lines():
-            if not line.startswith("data: "):
-                continue
-            events.append(line.removeprefix("data: ").strip())
+    r = await client.post("/v1/chat/completions", json=payload)
 
-    assert events[-1] == "[DONE]"
-    error_payloads = [json.loads(e) for e in events if e != "[DONE]" and "error" in e]
-    assert len(error_payloads) == 1
-    assert error_payloads[0]["error"] == {"message": "boom", "type": "server_error"}
+    assert r.status_code == 500
+    assert r.json()["error"] == {"message": "boom", "type": "server_error"}
 
 
 async def test_chat_completion_streaming_partial_output_then_error(

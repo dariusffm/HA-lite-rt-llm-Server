@@ -45,20 +45,27 @@ async def test_chat_non_streaming(ollama_client: AsyncClient):
     assert body["done_reason"] == "stop"
 
 
-async def test_chat_streams_error_record_on_engine_failure(
+async def test_chat_failure_before_any_output_is_an_http_error(
     ollama_client: AsyncClient, fake_engine: FakeEngine
 ):
+    """Nothing has been written yet, so the failure belongs in the status.
+
+    The first token is pulled before the streaming response is built; a
+    failure up to that point — a busy engine, a missing model — would
+    otherwise be an NDJSON record inside a body that already said 200.
+    """
     fake_engine.raise_error = RuntimeError("boom")
-    chunks = await post_ndjson(
-        ollama_client,
+    r = await ollama_client.post(
         "/api/chat",
-        {
+        json={
             "model": "gemma-4-e2b",
             "messages": [{"role": "user", "content": "Hi"}],
             "stream": True,
         },
     )
-    assert chunks == [{"error": "boom"}]
+
+    assert r.status_code == 500
+    assert r.json() == {"error": "boom"}
 
 
 async def test_chat_non_streaming_engine_error(ollama_client: AsyncClient, fake_engine: FakeEngine):

@@ -23,6 +23,7 @@ LITERT_SWITCHING_TOOL_NAMES="$(config_list 'switching_tool_names')"
 export LITERT_SWITCHING_TOOL_NAMES
 bashio::log.info "switching tools: ${LITERT_SWITCHING_TOOL_NAMES}"
 export LITERT_SWITCHING_BLOCK_REPLY="$(bashio::config 'switching_block_reply')"
+export LITERT_ENGINE_WAIT_TIMEOUT="$(bashio::config 'engine_wait_timeout')"
 export LITERT_GENERATION_TIMEOUT="$(bashio::config 'generation_timeout')"
 export LITERT_MODELS_DIR="/data/models"
 export LITERT_PORT="8080"

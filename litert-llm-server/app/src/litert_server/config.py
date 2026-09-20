@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     tool_call_repair: bool = True
     switching_tool_names: list[str] = ["HassTurnOn", "HassTurnOff", "HassToggle"]
     switching_block_reply: str = "Welches Gerät oder welchen Bereich meinst du genau?"
+    # 0 means "follow generation_timeout": one waiting request survives
+    # exactly one running generation. An explicit value overrides that.
+    engine_wait_timeout: int = Field(default=0, ge=0, le=600)
     generation_timeout: int = Field(default=240, ge=0, le=600)
     hf_token: str | None = Field(default=None, validation_alias="HF_TOKEN")
 

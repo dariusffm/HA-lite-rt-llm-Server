@@ -98,12 +98,17 @@ Branch A `fix/config-wiring-and-completion-stream` (0.6.0), lokal abgenommen, **
 - [x] `/v1/completions` streamt bei `stream: true`
 - [x] Fehlermeldung eines fehlenden Modells nennt nicht mehr den absoluten Containerpfad
 
-Branch B `fix/engine-serialization` (geplant 0.7.0), **noch nicht begonnen** — Reihenfolge laut
-Revision 1: erst Abbruch/Bereinigung (`aclose()`-Kette), dann das Engine-Gate.
-- [ ] Punkt 1: gemeinsame Zugriffskontrolle, Klammer über die ganze Anfrage (die Kompaktierung ruft die Engine zweimal), Gate als eigenes Modul `engines/gate.py`, Wartedeckel = `generation_timeout`, Warteschlangentiefe 4
-- [ ] Punkt 2: `_fire_cancel`-`join` vom Event-Loop nehmen, `_drop_held`-`close()` ebenso, explizite `aclose()`-Kette, `producer_done` nach `_bridge_producer`, TTL-Timer unter das Gate
-- [ ] `EngineBusyError`/`EngineUnavailableError` in `domain/errors.py`, Adapter antworten 503 mit `Retry-After`; `prime()` vor dem Bau der `StreamingResponse`, sonst ist 503 im Streaming-Pfad unerreichbar
-- [ ] Hängender Producer → `/readyz` false, `log.error`, `sys.exit(1)` (s6 startet neu)
+Branch B `fix/engine-serialization` (0.7.0), lokal abgenommen, **nicht ausgerollt**:
+- [x] Punkt 1: gemeinsame Zugriffskontrolle, Klammer über die ganze Anfrage (re-entrant per `contextvars`, weil die Kompaktierung die Engine zweimal ruft), Gate als eigenes Modul `engines/gate.py`, Wartedeckel = `generation_timeout`, Warteschlangentiefe 4
+- [x] Punkt 2: `_fire_cancel`-`join` vom Event-Loop genommen (gemessen: 116 ms Lücke vorher), `_drop_held`-`close()` im Hintergrund, explizite `closing()`-Kette durch die Dekoratoren, `thread_done` in `_bridge_producer` für beide Pfade, TTL-Timer erwirbt das Gate
+- [x] `EngineBusyError`/`EngineUnavailableError` in `domain/errors.py`, beide Adapter antworten 503 mit `Retry-After`; `prime()` zieht den ersten Token vor dem Bau der `StreamingResponse`
+- [x] Hängender Producer → `/readyz` meldet `engine-unusable`, `log.error`, SIGTERM an den eigenen Prozess (s6 startet neu; SIGTERM statt `sys.exit`, damit uvicorn die Sockets schließt)
+
+**Offen und nur auf dem Host prüfbar (Branch B gilt bis dahin NICHT als bewiesen):**
+- [ ] Zwei gleichzeitige Anfragen auf dem HAOS-Host: zweite wartet statt zu verschränken, Logzeilen vergleichen
+- [ ] Modellwechsel während laufender Inferenz (zweites Modell im Katalog nötig)
+- [ ] Verhalten nach einem echten `generation_timeout`: bekommt die nächste Anfrage den Slot?
+- [ ] Ob die nativen Threads in litert-lm selbst frei von Races sind, sagen diese Tests **nicht** — sie beweisen die Python-seitige Serialisierung und dass der Event-Loop ansprechbar bleibt
 
 Security-Befunde aus dem Review, bewusst **nicht** in diesen Branches (je ein eigener Schnitt):
 - [ ] **Keine Authentifizierung.** Der Dienst bindet auf `0.0.0.0:8080` im LAN, jeder Host kann Inferenz auslösen, Modelle ziehen und löschen. **Entschieden am 2026-09-20: optionaler Bearer-Token** als neue Option `api_key` — leer lässt alles wie heute (keine erzwungene Migration), gesetzt verlangen alle Routen den Token. HAs Ollama- und LiteLLM-Integration haben beide ein API-Key-Feld, die Migration sind zwei Einträge in HA. `ingress` + Bind auf `127.0.0.1` wurde verworfen, weil es Port 8080 aus dem LAN nimmt und beide HA-Integrationen sowie die curl-Rollout-Prüfung vom Mac bricht

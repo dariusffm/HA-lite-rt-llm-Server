@@ -17,16 +17,19 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from litert_server.adapters.defaults import GenerationDefaults
+from litert_server.domain.errors import EngineBusyError, EngineUnavailableError
 from litert_server.domain.inference import (
     InferenceService,
     collect_chat,
     collect_completion,
+    prime,
 )
 from litert_server.domain.model_names import InvalidModelNameError
 from litert_server.domain.model_registry import ModelRegistry
 from litert_server.domain.types import (
     ChatTurn,
     GenerationParams,
+    Token,
     ToolCall,
     ToolSpec,
     new_tool_call_id,
@@ -185,6 +188,11 @@ def _error_record(exc: Exception) -> str:
 
 
 def _error_response(exc: Exception) -> JSONResponse:
+    if isinstance(exc, EngineBusyError | EngineUnavailableError):
+        log.warning("engine unavailable: %s", exc)
+        return JSONResponse(
+            status_code=503, headers={"Retry-After": "30"}, content={"error": str(exc)}
+        )
     if isinstance(exc, InvalidModelNameError):
         return JSONResponse(status_code=400, content={"error": str(exc)})
     log.exception("engine error")
@@ -241,10 +249,10 @@ def build_ollama_router(
                 rec["done_reason"] = done_reason
             return _nd(rec)
 
-        async def emit() -> AsyncIterator[str]:
+        async def emit(tokens: AsyncIterator[Token]) -> AsyncIterator[str]:
             finish: str | None = None
             try:
-                async for tok in engine.stream_chat(model, turns, params, tools):
+                async for tok in tokens:
                     if tok.tool_calls:
                         yield record(
                             {
@@ -269,7 +277,13 @@ def build_ollama_router(
             )
 
         if req.stream:
-            return StreamingResponse(emit(), media_type="application/x-ndjson")
+            # First token here, not inside the body: otherwise a busy engine
+            # would be reported inside a response that already said 200.
+            try:
+                _, tokens = await prime(engine.stream_chat(model, turns, params, tools))
+            except Exception as exc:
+                return _error_response(exc)
+            return StreamingResponse(emit(tokens), media_type="application/x-ndjson")
 
         try:
             text, finish, calls = await collect_chat(engine, model, turns, params, tools)
@@ -294,10 +308,10 @@ def build_ollama_router(
         params = _params_from_ollama_options(req.options, resolved)
         created_at = datetime.now(UTC).isoformat()
 
-        async def emit() -> AsyncIterator[str]:
+        async def emit(tokens: AsyncIterator[Token]) -> AsyncIterator[str]:
             finish: str | None = None
             try:
-                async for tok in engine.stream_completion(model, req.prompt, params):
+                async for tok in tokens:
                     if tok.text:
                         yield _nd(
                             {
@@ -323,7 +337,11 @@ def build_ollama_router(
             )
 
         if req.stream:
-            return StreamingResponse(emit(), media_type="application/x-ndjson")
+            try:
+                _, tokens = await prime(engine.stream_completion(model, req.prompt, params))
+            except Exception as exc:
+                return _error_response(exc)
+            return StreamingResponse(emit(tokens), media_type="application/x-ndjson")
 
         try:
             text, finish = await collect_completion(engine, model, req.prompt, params)

@@ -55,6 +55,7 @@ with HTTP 401.
 | `tool_call_repair` | true | Fill in the entity `name` of a tool call from the user's words when the model left it out |
 | `switching_tool_names` | `[HassTurnOn, HassTurnOff, HassToggle]` | Tools that may not be run without a target (`name`, `area` or `floor`) |
 | `switching_block_reply` | `Welches Gerät oder welchen Bereich meinst du genau?` | Reply the model sees when an untargeted switching call is blocked |
+| `engine_wait_timeout` | 0 | Seconds a request waits for the engine to become free; `0` follows `generation_timeout`. Past it, and past four waiting requests, the answer is 503 with `Retry-After` |
 | `generation_timeout` | 240 | Seconds a single generation may run before it is cancelled; `0` disables |
 | `preload_models` | `[]` | Model names to pull on startup |
 | `tool_calling` | true | Ignore/accept client tool definitions (see DOCS) |

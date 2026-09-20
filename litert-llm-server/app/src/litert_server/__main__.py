@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import signal
 import sys
 from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager
@@ -28,6 +29,7 @@ from litert_server.adapters.openai_router import build_openai_router
 from litert_server.config import Settings
 from litert_server.domain.inference import InferenceService
 from litert_server.domain.model_registry import ModelRegistry
+from litert_server.engines.gate import EngineGate
 from litert_server.engines.litert import LiteRTEngine
 from litert_server.model_registry.filesystem import FilesystemCache
 from litert_server.model_registry.huggingface import HuggingFaceRegistry
@@ -103,6 +105,19 @@ async def preload_models(registry: ModelRegistry, names: list[str]) -> None:
             log.info("preloaded %s", name)
 
 
+def _shut_down(reason: str) -> None:
+    """Leave the process to the supervisor.
+
+    A producer thread that never confirmed it finished cannot be reclaimed
+    from inside this process: whatever it still holds in the runtime stays
+    held, and handing the engine to the next request could close resources
+    it is using. s6 restarts the service, which is the only real recovery.
+    SIGTERM rather than sys.exit so uvicorn shuts down its sockets first.
+    """
+    log.error("shutting down: %s", reason)
+    signal.raise_signal(signal.SIGTERM)
+
+
 def build_app(
     *,
     engine: InferenceService,
@@ -110,6 +125,7 @@ def build_app(
     tools_enabled: bool = True,
     defaults: GenerationDefaults | None = None,
     on_startup: Callable[[], Coroutine[Any, Any, None]] | None = None,
+    engine_ok: Callable[[], bool] | None = None,
 ) -> FastAPI:
     background: set[asyncio.Task[None]] = set()
 
@@ -124,7 +140,7 @@ def build_app(
             task.add_done_callback(background.discard)
         yield
 
-    app = FastAPI(title="litert-llm-server", version="0.6.0", lifespan=lifespan)
+    app = FastAPI(title="litert-llm-server", version="0.7.0", lifespan=lifespan)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
@@ -139,6 +155,10 @@ def build_app(
         — so "ready" here means "the registry has something we could
         serve", not "the engine has weights mapped".
         """
+        if engine_ok is not None and not engine_ok():
+            # The engine cannot be handed to another request; the process is
+            # on its way out. Say so before the supervisor asks again.
+            return {"status": "engine-unusable", "ready": False}
         models = await registry.list()
         return {"status": "ready" if models else "no-models", "ready": bool(models)}
 
@@ -161,12 +181,18 @@ def make_production_app() -> FastAPI:
     configure_logging(settings.log_level)
     cache = FilesystemCache(root=settings.models_dir)
     registry = HuggingFaceRegistry(cache=cache, hf_token=settings.hf_token)
-    engine: InferenceService = LiteRTEngine(
+    # A waiting request should survive exactly one running generation, so the
+    # cap follows generation_timeout unless the option overrides it.
+    wait_timeout = settings.engine_wait_timeout or settings.generation_timeout
+    gate = EngineGate(wait_timeout=wait_timeout, on_unrecoverable=_shut_down)
+    litert = LiteRTEngine(
         models_dir=settings.models_dir,
         max_num_tokens=settings.context_length,
         conversation_ttl=settings.conversation_ttl,
         generation_timeout=settings.generation_timeout,
+        gate=gate,
     )
+    engine: InferenceService = litert
     compacting = compaction_enabled(settings.prompt_compaction, settings.context_length)
     if compacting:
         engine = CompactingInferenceService(engine)
@@ -203,6 +229,7 @@ def make_production_app() -> FastAPI:
         engine=engine,
         registry=registry,
         tools_enabled=settings.tool_calling,
+        engine_ok=lambda: gate.available,
         on_startup=(
             (lambda: preload_models(registry, settings.preload_models))
             if settings.preload_models

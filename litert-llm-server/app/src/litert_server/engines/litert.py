@@ -22,6 +22,8 @@ from litert_lm import (
 )
 from litert_lm.interfaces import Tool
 
+from litert_server.domain.errors import InferenceError
+from litert_server.domain.inference import closing
 from litert_server.domain.model_names import model_path
 from litert_server.domain.types import (
     ChatTurn,
@@ -38,6 +40,7 @@ from litert_server.engines.continuation import (
     find_continuation,
     tools_key,
 )
+from litert_server.engines.gate import CONFIRM_TIMEOUT_SECONDS, EngineGate
 
 log = logging.getLogger(__name__)
 
@@ -432,15 +435,20 @@ class LiteRTEngine:
         max_num_tokens: int = 8192,
         conversation_ttl: float = 300.0,
         generation_timeout: float = 120.0,
+        gate: EngineGate | None = None,
     ) -> None:
         self.models_dir = models_dir
         self.max_num_tokens = max_num_tokens
         self.conversation_ttl = conversation_ttl
         self.generation_timeout = generation_timeout
         self._lock = Lock()
+        # No cap by default: a caller that does not configure the gate keeps
+        # the previous behaviour (wait) instead of suddenly seeing 503.
+        self._gate = gate or EngineGate(wait_timeout=0.0)
         self.current_model: str | None = None
         self._engine: Any | None = None
         self._held: _Held | None = None
+        self._ttl_tasks: set[asyncio.Task[None]] = set()
 
     def _model_file(self, model_name: str) -> Path:
         return model_path(self.models_dir, model_name, ".litertlm")
@@ -525,14 +533,49 @@ class LiteRTEngine:
         self._held = held
 
     def _expire_held(self, held: _Held) -> None:
-        if self._held is held and not held.busy:
-            self._drop_held("ttl expired")
+        """TTL elapsed: drop the held conversation — but not mid-generation.
+
+        The timer fires on the event loop regardless of what the engine is
+        doing, and ``busy`` is only set on the reuse path, so a *fresh*
+        request decoding right now would not stop it. Closing a conversation
+        while the runtime is working is exactly the race the gate exists for,
+        so the drop takes the slot like any other engine use.
+        """
+        if self._held is not held or held.busy:
+            return
+
+        async def drop() -> None:
+            try:
+                async with self._gate.acquire():
+                    if self._held is held and not held.busy:
+                        self._drop_held("ttl expired")
+            except InferenceError as exc:
+                # Busy or unusable: leave it held; the next drop or the
+                # process restart takes care of it.
+                log.debug("ttl expiry skipped: %r", exc)
+
+        task = asyncio.create_task(drop())
+        self._ttl_tasks.add(task)
+        task.add_done_callback(self._ttl_tasks.discard)
 
     async def stream_completion(
         self,
         model: str,
         prompt: str,
         params: GenerationParams,
+    ) -> AsyncIterator[Token]:
+        thread_done = Event()
+        async with self._gate.acquire(confirm=lambda: thread_done.wait(CONFIRM_TIMEOUT_SECONDS)):
+            async with closing(self._completion_inner(model, prompt, params, thread_done)) as s:
+                async for tok in s:
+                    yield tok
+
+    async def _completion_inner(
+        self,
+        model: str,
+        prompt: str,
+        params: GenerationParams,
+        thread_done: Event,
     ) -> AsyncIterator[Token]:
         self._forget_other_model(model)
         await asyncio.to_thread(self._ensure_loaded, model)
@@ -561,6 +604,7 @@ class LiteRTEngine:
             session.cancel_process,
             generation_timeout=self.generation_timeout,
             max_tokens=params.max_tokens,
+            thread_done=thread_done,
         ):
             yield tok
 
@@ -570,6 +614,27 @@ class LiteRTEngine:
         messages: list[ChatTurn],
         params: GenerationParams,
         tools: list[ToolSpec] | None = None,
+    ) -> AsyncIterator[Token]:
+        """Hold the engine slot for the whole request.
+
+        The slot covers this call and anything nested inside it (prompt
+        compaction's stage-one call runs under the same acquisition), and is
+        released only once the producer thread has confirmed it returned.
+        """
+        thread_done = Event()
+        async with self._gate.acquire(confirm=lambda: thread_done.wait(CONFIRM_TIMEOUT_SECONDS)):
+            inner = self._chat_inner(model, messages, params, tools, thread_done)
+            async with closing(inner) as stream:
+                async for tok in stream:
+                    yield tok
+
+    async def _chat_inner(
+        self,
+        model: str,
+        messages: list[ChatTurn],
+        params: GenerationParams,
+        tools: list[ToolSpec] | None,
+        thread_done: Event,
     ) -> AsyncIterator[Token]:
         if not messages:
             raise ValueError("messages must not be empty")
@@ -768,6 +833,7 @@ class LiteRTEngine:
                 cancel,
                 generation_timeout=self.generation_timeout,
                 max_tokens=params.max_tokens,
+                thread_done=thread_done,
             ):
                 if tok.finish_reason == "length":
                     stopped_at_limit = True

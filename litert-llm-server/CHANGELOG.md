@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.7.0 — 2026-09-20
+
+- The engine now serves one request at a time. Only model loading was
+  guarded before, so a model switch could close the engine while another
+  request was still decoding, and prompt compaction's preparatory call
+  raced the generation it was preparing. The slot covers a whole request,
+  including the nested call compaction makes, and is released only once the
+  producer thread confirms it has returned.
+- While the engine is occupied a request waits, by default as long as one
+  generation may run (`engine_wait_timeout`, `0` follows
+  `generation_timeout`). Past that, or past four waiting requests, the
+  answer is 503 with `Retry-After` instead of an unbounded queue.
+- A failure that happens before any output is now an HTTP status instead of
+  an error inside a body that already announced 200. This applies to both
+  adapters, streaming and not.
+- If a generation's native work never confirms it finished, the service
+  reports itself unready and exits so the supervisor restarts it. Nothing
+  in the process can reclaim that thread, and handing the engine to the
+  next request could close resources it is still using.
+- Abort and cleanup no longer run on the event loop: cancelling a
+  generation blocked every other request for up to 0.1 s, and closing a
+  conversation blocked for as long as the runtime took.
+- Streams are closed explicitly through the decorator chain, so the
+  engine's cleanup runs when a client disconnects rather than whenever the
+  event loop gets around to finalizing the generator.
+- The conversation TTL timer takes the engine slot before closing anything,
+  instead of firing into a running generation.
+
 ## 0.6.0 — 2026-09-20
 
 - Model names from HTTP requests are validated before they become
