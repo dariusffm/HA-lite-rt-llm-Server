@@ -72,3 +72,17 @@ Spec `docs/superpowers/specs/2026-09-16-conversation-reuse-design.md`, Plan `doc
 - [ ] Zweiten, schlanken Konversationsagenten nur mit Wetter/News-Werkzeugen anlegen (Assist-Prompt mit allen Entitäten kostet 3–4 min pro Durchlauf)
 - [ ] Später/optional MCP-Weg: SearXNG-Add-on (`pol4rfuchs/ha-apps`) + SearXNG-MCP-Server + Community-Add-on `mcp-proxy` (stdio→SSE; HAs MCP-Integration spricht nur SSE) → URL in HA-Integration "Model Context Protocol"
 - [x] Vorbestehende Format-Abweichung: `ruff format` auf 17 Dateien angewandt (2026-09-17), Baum ist formatiert
+
+## LiteLLM-Integration (HA Core 2026.8+)
+
+Abnahme und Analyse: `docs/benchmarks/2026-09-20-litellm-integration-e2e.md`. Die Integration ist ein reiner
+OpenAI-Client (`/v1/models` + `/v1/chat/completions`, kein Streaming, keine LiteLLM-Routen) und läuft ohne
+LiteLLM-Proxy direkt gegen das Add-on; am 2026-09-20 auf dem Host abgenommen (Pipeline „litellm" neben „ollama").
+
+- [ ] Prompt-Parität mit dem Ollama-Agenten herstellen (Optionen nur im Dialog lesbar), dann A/B derselben Fragen
+- [ ] Schaltbefehl über den LiteLLM-Pfad testen — der Weg, der beim Ollama-Pfad `services/repair.py` braucht
+- [ ] Retry-Verhalten prüfen: die Integration lässt die `openai`-Defaults stehen (600 s Timeout, `max_retries=2`);
+      ein Retry auf den Single-Slot-Engine wäre schädlich (hängt am Punkt „Engine-Semaphore")
+- [ ] Entscheidung: `user=conversation_id` als expliziten Konversationsschlüssel nutzen statt der Heuristik in
+      `engines/continuation.py`? Gilt nur für den OpenAI-Pfad, der Ollama-Pfad braucht die Heuristik weiter
+- [ ] `max_tokens` kommt nicht mit → Add-on-Default 512; prüfen, ob das für Abschlussantworten reicht
