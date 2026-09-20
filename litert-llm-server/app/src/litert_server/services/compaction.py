@@ -15,7 +15,7 @@ import time
 from collections import OrderedDict
 from collections.abc import AsyncIterator
 
-from litert_server.domain.inference import InferenceService, collect_chat
+from litert_server.domain.inference import InferenceService, closing, collect_chat
 from litert_server.domain.types import ChatTurn, GenerationParams, Token, ToolSpec
 from litert_server.services.chat_turns import last_two_user_texts
 from litert_server.services.ha_prompt import (
@@ -76,8 +76,9 @@ class CompactingInferenceService:
         tools: list[ToolSpec] | None = None,
     ) -> AsyncIterator[Token]:
         prepared = await self._prepare(model, messages)
-        async for tok in self._inner.stream_chat(model, prepared, params, tools):
-            yield tok
+        async with closing(self._inner.stream_chat(model, prepared, params, tools)) as stream:
+            async for tok in stream:
+                yield tok
 
     # -- compaction -----------------------------------------------------------
 

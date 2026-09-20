@@ -15,7 +15,7 @@ import re
 from collections.abc import AsyncIterator
 from typing import Any
 
-from litert_server.domain.inference import InferenceService
+from litert_server.domain.inference import InferenceService, closing
 from litert_server.domain.types import ChatTurn, GenerationParams, Token, ToolCall, ToolSpec
 from litert_server.services.chat_turns import last_two_user_texts
 from litert_server.services.ha_prompt import Entity, entity_names, split_static_context
@@ -126,8 +126,9 @@ class ToolCallRepairService:
     async def stream_completion(
         self, model: str, prompt: str, params: GenerationParams
     ) -> AsyncIterator[Token]:
-        async for tok in self._inner.stream_completion(model, prompt, params):
-            yield tok
+        async with closing(self._inner.stream_completion(model, prompt, params)) as stream:
+            async for tok in stream:
+                yield tok
 
     async def stream_chat(
         self,
@@ -136,10 +137,11 @@ class ToolCallRepairService:
         params: GenerationParams,
         tools: list[ToolSpec] | None = None,
     ) -> AsyncIterator[Token]:
-        async for tok in self._inner.stream_chat(model, messages, params, tools=tools):
-            if tok.tool_calls and tools:
-                tok = self._repair(tok, messages, tools)
-            yield tok
+        async with closing(self._inner.stream_chat(model, messages, params, tools=tools)) as stream:
+            async for tok in stream:
+                if tok.tool_calls and tools:
+                    tok = self._repair(tok, messages, tools)
+                yield tok
 
     def _repair(self, tok: Token, messages: list[ChatTurn], tools: list[ToolSpec]) -> Token:
         try:
