@@ -142,7 +142,12 @@ def _fire_cancel(cancel: Cancel) -> Thread:
 
 
 async def _bridge_producer(
-    producer: Producer, cancel: Cancel, *, generation_timeout: float = 0.0, max_tokens: int = 0
+    producer: Producer,
+    cancel: Cancel,
+    *,
+    generation_timeout: float = 0.0,
+    max_tokens: int = 0,
+    thread_done: Event | None = None,
 ) -> AsyncIterator[Token]:
     """Run a synchronous ``producer`` in a daemon thread and yield tokens it
     puts on a bounded queue. On ``GeneratorExit`` (client disconnect) or
@@ -162,6 +167,14 @@ async def _bridge_producer(
     call. Enforcing it on the consumer side keeps that promise and leaves
     conversation reuse intact. It counts chunks, which is one decoded token
     per chunk for litert-lm 0.17 but is an approximation, not a tokenizer.
+
+    ``thread_done`` is set once the producer thread has actually returned,
+    on every path — normal end, failure, abandoned consumer, timeout. It is
+    the only signal that says the native work is over: ``stream_chat`` sets
+    its own ``producer_done`` while still inside the thread, which answers
+    "the reply is complete", not "nothing is running any more". Anything
+    that must wait for the native side to be finished — releasing an engine
+    slot, closing a conversation — needs this one.
     """
     q = _TokenQueue(maxsize=_TOKEN_QUEUE_MAX)
     state = _GenState()
@@ -179,6 +192,9 @@ async def _bridge_producer(
             except _ConsumerGone:
                 log.debug("producer failed after consumer left: %r", exc)
                 q.wake_consumer()
+        finally:
+            if thread_done is not None:
+                thread_done.set()
 
     Thread(target=runner, daemon=True).start()
 
