@@ -38,7 +38,13 @@ if bashio::config.has_value 'hf_token'; then
 fi
 
 # Persist for s6-overlay v3 (base-python:14.0.2 ships v3).
+# The filter matches printenv's "NAME=value" lines, so HF_TOKEN needs the
+# "=" — anchoring with "HF_TOKEN$" matched a bare name that never occurs and
+# silently dropped the token, leaving gated model downloads unauthenticated.
+# umask keeps the token file from being world-readable.
 mkdir -p /run/s6/container_environment
-printenv | grep -E '^(LITERT_|HF_TOKEN$)' | while IFS='=' read -r key value; do
+chmod 700 /run/s6/container_environment
+umask 077
+printenv | grep -E '^(LITERT_|HF_TOKEN=)' | while IFS='=' read -r key value; do
     printf '%s' "${value}" > "/run/s6/container_environment/${key}"
 done
