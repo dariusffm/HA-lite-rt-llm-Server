@@ -65,7 +65,7 @@ async def test_chat_failure_before_any_output_is_an_http_error(
     )
 
     assert r.status_code == 500
-    assert r.json() == {"error": "boom"}
+    assert r.json() == {"error": "Internal server error"}
 
 
 async def test_chat_non_streaming_engine_error(ollama_client: AsyncClient, fake_engine: FakeEngine):
@@ -79,7 +79,7 @@ async def test_chat_non_streaming_engine_error(ollama_client: AsyncClient, fake_
         },
     )
     assert r.status_code == 500
-    assert r.json() == {"error": "boom"}
+    assert r.json() == {"error": "Internal server error"}
 
 
 async def test_chat_streams_partial_output_then_error_record(
@@ -99,4 +99,4 @@ async def test_chat_streams_partial_output_then_error_record(
     assert len(chunks) == 3
     assert chunks[0]["message"]["content"] == "Hello"
     assert chunks[1]["message"]["content"] == ", "
-    assert chunks[2] == {"error": "boom"}
+    assert chunks[2] == {"error": "Internal server error"}
