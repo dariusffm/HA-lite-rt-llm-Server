@@ -396,10 +396,12 @@ def build_ollama_router(
                 last_status = "error"
         return {"status": last_status}
 
-    @router.post("/show")
-    async def show(req: OllamaShowRequest) -> dict[str, Any]:
+    @router.post("/show", response_model=None)
+    async def show(req: OllamaShowRequest) -> dict[str, Any] | JSONResponse:
         try:
             m = await registry.get(req.name)
+        except InvalidModelNameError as exc:
+            return _error_response(exc)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="model not found") from exc
         return {

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
+from litert_server.domain.model_names import validate_model_name
 from litert_server.domain.types import ModelInfo, PullProgress
 
 
@@ -23,11 +24,13 @@ class FakeRegistry:
         return list(self.models.values())
 
     async def get(self, name: str) -> ModelInfo:
+        validate_model_name(name)
         if name not in self.models:
             raise KeyError(name)
         return self.models[name]
 
     async def pull(self, name: str) -> AsyncIterator[PullProgress]:
+        validate_model_name(name)
         total = 1_000
         for i in range(1, self.pull_chunks + 1):
             yield PullProgress(
@@ -39,4 +42,5 @@ class FakeRegistry:
             self.models[name] = ModelInfo(name=name, size_bytes=total, quantization="int4")
 
     async def delete(self, name: str) -> None:
+        validate_model_name(name)
         self.models.pop(name, None)
