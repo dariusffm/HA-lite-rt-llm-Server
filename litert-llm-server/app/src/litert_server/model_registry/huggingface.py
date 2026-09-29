@@ -136,7 +136,10 @@ class HuggingFaceRegistry:
         try:
             tmp_path = await asyncio.to_thread(_download)
         except Exception as exc:
-            yield PullProgress(bytes_done=0, bytes_total=0, status="error", error=str(exc))
+            err_msg = str(exc)
+            if self.hf_token and self.hf_token in err_msg:
+                err_msg = err_msg.replace(self.hf_token, "[REDACTED]")
+            yield PullProgress(bytes_done=0, bytes_total=0, status="error", error=err_msg)
             return
 
         target = self.cache.path_for(name)

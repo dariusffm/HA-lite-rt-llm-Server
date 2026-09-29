@@ -67,6 +67,25 @@ async def test_pull_unknown_emits_error(tmp_path: Path):
     assert progress[-1].status == "error"
 
 
+async def test_pull_error_redacts_hf_token(tmp_path: Path):
+    token = "hf_secret_token_12345"
+
+    def fake_download_fail(repo_id, filename, cache_dir, token, **_):
+        raise RuntimeError(f"Download failed using token {token} for repository")
+
+    reg = HuggingFaceRegistry(cache=FilesystemCache(root=tmp_path), hf_token=token)
+    target = next(iter(MODEL_CATALOG))
+    with patch(
+        "litert_server.model_registry.huggingface.hf_hub_download",
+        side_effect=fake_download_fail,
+    ):
+        progress = [p async for p in reg.pull(target)]
+
+    assert progress[-1].status == "error"
+    assert token not in progress[-1].error
+    assert "[REDACTED]" in progress[-1].error
+
+
 async def test_list_enriches_quantization_from_catalog(tmp_path: Path):
     (tmp_path / "gemma-4-e2b.litertlm").write_bytes(b"x" * 16)
     (tmp_path / "unknown-model.litertlm").write_bytes(b"x" * 16)
