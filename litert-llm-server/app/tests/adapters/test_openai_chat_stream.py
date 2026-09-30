@@ -55,7 +55,7 @@ async def test_streaming_failure_before_any_output_is_an_http_error(
     r = await client.post("/v1/chat/completions", json=payload)
 
     assert r.status_code == 500
-    assert r.json()["error"] == {"message": "boom", "type": "server_error"}
+    assert r.json()["error"] == {"message": "Internal server error", "type": "server_error"}
 
 
 async def test_chat_completion_streaming_partial_output_then_error(
@@ -82,5 +82,5 @@ async def test_chat_completion_streaming_partial_output_then_error(
     assert parsed[0]["choices"][0]["delta"].get("role") == "assistant"
     assert parsed[1]["choices"][0]["delta"].get("content") == "Hello"
     assert parsed[2]["choices"][0]["delta"].get("content") == ", "
-    assert parsed[3]["error"] == {"message": "boom", "type": "server_error"}
+    assert parsed[3]["error"] == {"message": "Internal server error", "type": "server_error"}
     assert len(parsed) == 4

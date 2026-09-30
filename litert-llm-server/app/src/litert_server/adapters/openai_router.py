@@ -188,7 +188,7 @@ log = logging.getLogger(__name__)
 
 def _error_frame(exc: Exception) -> str:
     log.exception("engine error")
-    error = {"error": {"message": str(exc), "type": "server_error"}}
+    error = {"error": {"message": "Internal server error", "type": "server_error"}}
     return f"data: {json.dumps(error)}\n\n"
 
 
@@ -212,7 +212,7 @@ def _error_response(exc: Exception) -> JSONResponse:
     log.exception("engine error")
     return JSONResponse(
         status_code=500,
-        content={"error": {"message": str(exc), "type": "server_error"}},
+        content={"error": {"message": "Internal server error", "type": "server_error"}},
     )
 
 
