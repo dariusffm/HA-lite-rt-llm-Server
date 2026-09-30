@@ -185,7 +185,7 @@ def _done_reason(finish: str | None) -> str:
 
 def _error_record(exc: Exception) -> str:
     log.exception("engine error")
-    return _nd({"error": str(exc)})
+    return _nd({"error": "Internal server error"})
 
 
 def _error_response(exc: Exception) -> JSONResponse:
@@ -199,7 +199,7 @@ def _error_response(exc: Exception) -> JSONResponse:
     if isinstance(exc, InvalidModelNameError):
         return JSONResponse(status_code=400, content={"error": str(exc)})
     log.exception("engine error")
-    return JSONResponse(status_code=500, content={"error": str(exc)})
+    return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
 
 def build_ollama_router(
