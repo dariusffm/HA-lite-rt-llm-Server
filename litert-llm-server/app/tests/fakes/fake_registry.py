@@ -23,6 +23,9 @@ class FakeRegistry:
         return list(self.models.values())
 
     async def get(self, name: str) -> ModelInfo:
+        from litert_server.domain.model_names import validate_model_name
+
+        validate_model_name(name)
         if name not in self.models:
             raise KeyError(name)
         return self.models[name]
