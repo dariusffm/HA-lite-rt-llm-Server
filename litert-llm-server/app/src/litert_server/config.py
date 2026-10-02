@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LogLevel = Literal["trace", "debug", "info", "notice", "warning", "error", "fatal", "critical"]
@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     # exactly one running generation. An explicit value overrides that.
     engine_wait_timeout: int = Field(default=0, ge=0, le=600)
     generation_timeout: int = Field(default=240, ge=0, le=600)
-    hf_token: str | None = Field(default=None, validation_alias="HF_TOKEN")
+    hf_token: SecretStr | None = Field(default=None, validation_alias="HF_TOKEN")
 
     @field_validator("preload_models", mode="before")
     @classmethod
@@ -59,5 +59,7 @@ class Settings(BaseSettings):
     @classmethod
     def _empty_token_is_none(cls, v: Any) -> Any:
         if isinstance(v, str) and not v.strip():
+            return None
+        if isinstance(v, SecretStr) and not v.get_secret_value().strip():
             return None
         return v

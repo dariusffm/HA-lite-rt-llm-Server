@@ -21,7 +21,10 @@ def test_settings_reads_env(monkeypatch):
     assert str(s.models_dir) == "/data/models"
     assert s.port == 8080
     assert s.preload_models == ["gemma-4-e2b"]
-    assert s.hf_token == "hf_xxx"
+    assert s.hf_token is not None
+    assert s.hf_token.get_secret_value() == "hf_xxx"
+    assert "hf_xxx" not in str(s.hf_token)
+    assert "hf_xxx" not in repr(s)
 
 
 def test_settings_defaults(monkeypatch):

@@ -2,6 +2,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from pydantic import SecretStr
 
 from litert_server.model_registry.filesystem import FilesystemCache
 from litert_server.model_registry.huggingface import (
@@ -59,6 +60,28 @@ async def test_pull_forwards_hf_token(tmp_path: Path):
         async for _ in reg.pull(next(iter(MODEL_CATALOG))):
             pass
     assert captured["token"] == "hf_test123"
+
+
+async def test_pull_forwards_secret_str_hf_token(tmp_path: Path):
+    captured: dict[str, object] = {}
+
+    def fake_download(repo_id, filename, cache_dir, token, **_):
+        captured["token"] = token
+        out = Path(cache_dir) / filename
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"y" * 16)
+        return str(out)
+
+    reg = HuggingFaceRegistry(
+        cache=FilesystemCache(root=tmp_path), hf_token=SecretStr("hf_secret123")
+    )
+    with patch(
+        "litert_server.model_registry.huggingface.hf_hub_download",
+        side_effect=fake_download,
+    ):
+        async for _ in reg.pull(next(iter(MODEL_CATALOG))):
+            pass
+    assert captured["token"] == "hf_secret123"
 
 
 async def test_pull_unknown_emits_error(tmp_path: Path):
