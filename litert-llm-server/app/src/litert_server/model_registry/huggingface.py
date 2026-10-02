@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Literal
 
 from huggingface_hub import hf_hub_download
+from pydantic import SecretStr
 
 from litert_server.domain.types import ModelInfo, PullProgress
 from litert_server.model_registry.filesystem import FilesystemCache
@@ -88,7 +89,7 @@ class HuggingFaceRegistry:
     """
 
     cache: FilesystemCache
-    hf_token: str | None = None  # injected by __main__ from Settings.hf_token
+    hf_token: SecretStr | str | None = None  # injected by __main__ from Settings.hf_token
 
     def _enrich(self, info: ModelInfo) -> ModelInfo:
         entry = MODEL_CATALOG.get(info.name)
@@ -126,11 +127,16 @@ class HuggingFaceRegistry:
         yield PullProgress(bytes_done=0, bytes_total=0, status="downloading")
 
         def _download() -> str:
+            token = (
+                self.hf_token.get_secret_value()
+                if isinstance(self.hf_token, SecretStr)
+                else self.hf_token
+            )
             return hf_hub_download(
                 repo_id=entry.repo_id,
                 filename=entry.filename,
                 cache_dir=str(self.cache.root / ".hf_cache"),
-                token=self.hf_token,
+                token=token,
             )
 
         try:
