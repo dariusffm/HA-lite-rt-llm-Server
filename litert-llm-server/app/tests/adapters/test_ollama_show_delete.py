@@ -13,8 +13,20 @@ async def test_show_unknown_returns_404(ollama_client: AsyncClient):
     assert r.status_code == 404
 
 
+async def test_show_invalid_name_returns_400(ollama_client: AsyncClient):
+    r = await ollama_client.post("/api/show", json={"name": "../invalid"})
+    assert r.status_code == 400
+    assert "invalid model name" in r.json()["error"]
+
+
 async def test_delete_removes_model(ollama_client: AsyncClient):
     r = await ollama_client.request("DELETE", "/api/delete", json={"name": "gemma-4-e2b"})
     assert r.status_code == 200
     tags = (await ollama_client.get("/api/tags")).json()
     assert all(m["name"] != "gemma-4-e2b" for m in tags["models"])
+
+
+async def test_delete_invalid_name_returns_400(ollama_client: AsyncClient):
+    r = await ollama_client.request("DELETE", "/api/delete", json={"name": "../invalid"})
+    assert r.status_code == 400
+    assert "invalid model name" in r.json()["error"]
