@@ -82,6 +82,20 @@ async def test_chat_non_streaming_engine_error(ollama_client: AsyncClient, fake_
     assert r.json() == {"error": "boom"}
 
 
+async def test_chat_model_not_found_404(ollama_client: AsyncClient, fake_engine: FakeEngine):
+    fake_engine.raise_error = FileNotFoundError("model not found: missing-model")
+    r = await ollama_client.post(
+        "/api/chat",
+        json={
+            "model": "missing-model",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "stream": False,
+        },
+    )
+    assert r.status_code == 404
+    assert r.json() == {"error": "model not found: missing-model"}
+
+
 async def test_chat_streams_partial_output_then_error_record(
     ollama_client: AsyncClient, fake_engine: FakeEngine
 ):

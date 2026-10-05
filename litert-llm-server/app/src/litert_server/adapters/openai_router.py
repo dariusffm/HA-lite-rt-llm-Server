@@ -209,6 +209,12 @@ def _error_response(exc: Exception) -> JSONResponse:
             status_code=400,
             content={"error": {"message": str(exc), "type": "invalid_request_error"}},
         )
+    if isinstance(exc, FileNotFoundError):
+        log.warning("model not found: %s", exc)
+        return JSONResponse(
+            status_code=404,
+            content={"error": {"message": str(exc), "type": "invalid_request_error"}},
+        )
     log.exception("engine error")
     return JSONResponse(
         status_code=500,

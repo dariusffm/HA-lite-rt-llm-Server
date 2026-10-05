@@ -44,3 +44,17 @@ async def test_chat_completion_non_streaming_engine_error(
     r = await client.post("/v1/chat/completions", json=payload)
     assert r.status_code == 500
     assert r.json() == {"error": {"message": "boom", "type": "server_error"}}
+
+
+async def test_chat_completion_model_not_found_404(client: AsyncClient, fake_engine: FakeEngine):
+    fake_engine.raise_error = FileNotFoundError("model not found: missing-model")
+    payload = {
+        "model": "missing-model",
+        "messages": [{"role": "user", "content": "Hi"}],
+        "stream": False,
+    }
+    r = await client.post("/v1/chat/completions", json=payload)
+    assert r.status_code == 404
+    assert r.json() == {
+        "error": {"message": "model not found: missing-model", "type": "invalid_request_error"}
+    }
