@@ -1,0 +1,4 @@
+## 2025-05-18 - Model Name Validation in Ollama Show Endpoint
+**Vulnerability:** The Ollama `/api/show` endpoint passed requested model names directly to `registry.get(req.name)` without prior `validate_model_name` validation or `InvalidModelNameError` exception handling, allowing invalid path structures or path traversal names to reach the registry layer.
+**Learning:** In FastAPI endpoints returning union responses including `JSONResponse` (such as error responses), `response_model=None` must be explicitly specified on the router decorator to prevent Pydantic field schema generation errors.
+**Prevention:** Always ensure adapter endpoints validate untrusted input before calling downstream services and handle domain exceptions with proper HTTP status codes and `response_model=None` if returning custom `JSONResponse` objects.
