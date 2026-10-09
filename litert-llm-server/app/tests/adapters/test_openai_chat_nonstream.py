@@ -43,4 +43,4 @@ async def test_chat_completion_non_streaming_engine_error(
     }
     r = await client.post("/v1/chat/completions", json=payload)
     assert r.status_code == 500
-    assert r.json() == {"error": {"message": "boom", "type": "server_error"}}
+    assert r.json() == {"error": {"message": "Internal server error", "type": "server_error"}}

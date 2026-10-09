@@ -37,7 +37,7 @@ async def test_generate_failure_before_any_output_is_an_http_error(
     )
 
     assert r.status_code == 500
-    assert r.json() == {"error": "boom"}
+    assert r.json() == {"error": "Internal server error"}
 
 
 async def test_generate_non_streaming_engine_error(
@@ -49,7 +49,7 @@ async def test_generate_non_streaming_engine_error(
         json={"model": "gemma-4-e2b", "prompt": "x", "stream": False},
     )
     assert r.status_code == 500
-    assert r.json() == {"error": "boom"}
+    assert r.json() == {"error": "Internal server error"}
 
 
 async def test_generate_streams_error_record_mid_stream(
@@ -63,5 +63,5 @@ async def test_generate_streams_error_record_mid_stream(
         {"model": "gemma-4-e2b", "prompt": "x", "stream": True},
     )
     assert [c["response"] for c in chunks[:2]] == ["Hello", ", "]
-    assert chunks[2] == {"error": "boom"}
+    assert chunks[2] == {"error": "Internal server error"}
     assert len(chunks) == 3

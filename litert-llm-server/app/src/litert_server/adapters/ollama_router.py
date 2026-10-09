@@ -184,8 +184,9 @@ def _done_reason(finish: str | None) -> str:
 
 
 def _error_record(exc: Exception) -> str:
+    # Security: Do not expose internal exception details or paths to client.
     log.exception("engine error")
-    return _nd({"error": str(exc)})
+    return _nd({"error": "Internal server error"})
 
 
 def _error_response(exc: Exception) -> JSONResponse:
@@ -198,8 +199,10 @@ def _error_response(exc: Exception) -> JSONResponse:
         )
     if isinstance(exc, InvalidModelNameError):
         return JSONResponse(status_code=400, content={"error": str(exc)})
+    # Security: Log internal details server-side but return generic error
+    # to avoid information disclosure.
     log.exception("engine error")
-    return JSONResponse(status_code=500, content={"error": str(exc)})
+    return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
 
 def build_ollama_router(
