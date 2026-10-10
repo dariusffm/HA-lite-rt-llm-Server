@@ -25,7 +25,7 @@ from litert_server.domain.inference import (
     collect_completion,
     prime,
 )
-from litert_server.domain.model_names import InvalidModelNameError
+from litert_server.domain.model_names import InvalidModelNameError, validate_model_name
 from litert_server.domain.model_registry import ModelRegistry
 from litert_server.domain.types import (
     ChatTurn,
@@ -198,6 +198,8 @@ def _error_response(exc: Exception) -> JSONResponse:
         )
     if isinstance(exc, InvalidModelNameError):
         return JSONResponse(status_code=400, content={"error": str(exc)})
+    if isinstance(exc, FileNotFoundError):
+        return JSONResponse(status_code=404, content={"error": str(exc)})
     log.exception("engine error")
     return JSONResponse(status_code=500, content={"error": str(exc)})
 
@@ -396,12 +398,15 @@ def build_ollama_router(
                 last_status = "error"
         return {"status": last_status}
 
-    @router.post("/show")
-    async def show(req: OllamaShowRequest) -> dict[str, Any]:
+    @router.post("/show", response_model=None)
+    async def show(req: OllamaShowRequest) -> dict[str, Any] | JSONResponse:
         try:
+            validate_model_name(req.name)
             m = await registry.get(req.name)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="model not found") from exc
+        except InvalidModelNameError as exc:
+            return _error_response(exc)
         return {
             "modelfile": "",
             "parameters": "",
